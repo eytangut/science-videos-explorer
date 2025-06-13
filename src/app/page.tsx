@@ -2,9 +2,12 @@
 "use client";
 
 import { useCallback, useEffect, useState, useMemo } from 'react';
-import type { Channel, Video, YouTubePlaylistItem, YouTubeVideoDetails } from '@/types';
+import type { Channel, Video } from '@/types';
 import { useChannels } from '@/hooks/useChannels';
 import { useWatchedVideos } from '@/hooks/useWatchedVideos';
+import { useWatchLaterVideos } from '@/hooks/useWatchLaterVideos';
+import { useHiddenOnMobileVideos } from '@/hooks/useHiddenOnMobileVideos';
+import { useIsMobile } from '@/hooks/use-mobile';
 import ChannelManagementPanel from '@/components/ChannelManagementPanel';
 import VideoList from '@/components/VideoList';
 import { toast } from '@/hooks/use-toast';
@@ -14,21 +17,38 @@ import useLocalStorage from '@/hooks/useLocalStorage';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Info } from 'lucide-react';
 
+type SortOption = {
+  property: keyof Pick<Video, 'rating' | 'views' | 'publishedDate' | 'title'>;
+  direction: 'asc' | 'desc';
+};
+
+type DurationFilter = 'all' | 'short' | 'medium' | 'long'; // short <10m, medium 10-30m, long >30m
+type WatchLaterFilter = 'all' | 'watchLaterOnly' | 'notWatchLater';
+
 
 export default function Home() {
   const { channels, addChannel, removeChannel, reorderChannels } = useChannels();
   const { watchedVideoIds, addWatchedVideo, isVideoWatched } = useWatchedVideos();
+  const { watchLaterVideoIds, toggleWatchLater, isVideoWatchLater } = useWatchLaterVideos();
+  const { hiddenOnMobileVideoIds, addHiddenOnMobileVideo, isVideoHiddenOnMobile } = useHiddenOnMobileVideos();
+  const isMobile = useIsMobile();
+  
   const [allVideos, setAllVideos] = useLocalStorage<Video[]>('allVideosCache', []);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [apiKey, setApiKey] = useLocalStorage<string>('youtubeApiKey', '');
 
+  const [sortOption, setSortOption] = useState<SortOption>({ property: 'rating', direction: 'desc' });
+  const [durationFilter, setDurationFilter] = useState<DurationFilter>('all');
+  const [watchLaterFilter, setWatchLaterFilter] = useState<WatchLaterFilter>('all');
+
+
   const handleSetApiKey = (newApiKey: string) => {
     setApiKey(newApiKey);
     if (newApiKey && channels.length > 0) {
-      aggregateAndSortVideos(false, newApiKey); // Fetch if API key is now valid and channels exist
+      aggregateAndSortVideos(false, newApiKey);
     } else if (!newApiKey) {
-      setAllVideos([]); // Clear videos if API key is removed
+      setAllVideos([]);
       setError("API Key removed. Please set your YouTube API Key to fetch videos.");
     }
   };
@@ -43,12 +63,12 @@ export default function Home() {
       throw new Error(`Could not find uploads playlist for channel: ${channel.name}`);
     }
 
-    const playlistItems: YouTubePlaylistItem[] = await fetchPlaylistVideos(currentApiKey, uploadsPlaylistId, 20);
+    const playlistItems = await fetchPlaylistVideos(currentApiKey, uploadsPlaylistId, 20);
     
     const videoIds = playlistItems.map(item => item.contentDetails.videoId).filter(id => !!id);
     if (videoIds.length === 0) return [];
 
-    const videoDetailsList: YouTubeVideoDetails[] = await fetchVideosDetails(currentApiKey, videoIds);
+    const videoDetailsList = await fetchVideosDetails(currentApiKey, videoIds);
 
     return videoDetailsList
       .map(details => {
@@ -63,8 +83,8 @@ export default function Home() {
         
         const durationSeconds = parseISO8601Duration(details.contentDetails.duration);
 
-        if (durationSeconds <= 60) {
-          return null; // Filter out shorts
+        if (durationSeconds <= 60) { // Filter out shorts (<= 60 seconds)
+          return null;
         }
 
         return {
@@ -87,12 +107,12 @@ export default function Home() {
   const aggregateAndSortVideos = useCallback(async (forceRefresh = false, currentApiKey = apiKey) => {
     if (!currentApiKey) {
       setError("YouTube API Key is not set. Please add it in the Channel Setup panel to fetch videos.");
-      setAllVideos([]); // Clear videos if no API key
+      setAllVideos([]);
       setIsLoading(false);
       return;
     }
     if (channels.length === 0) {
-      setAllVideos([]); // Clear videos if no channels
+      setAllVideos([]);
       setError(null);
       setIsLoading(false);
       return;
@@ -101,7 +121,6 @@ export default function Home() {
     setIsLoading(true);
     setError(null);
 
-    // Check if we can use existing data (cache)
     const canUseExistingData = !forceRefresh && allVideos.length > 0 &&
       channels.every(c => allVideos.some(v => v.channelId === c.youtubeChannelId));
 
@@ -113,17 +132,14 @@ export default function Home() {
         .map(v => { 
             const publishedDate = new Date(v.publishedDate);
             const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDate.getTime()) / (1000 * 60 * 60));
-            // Rating uses views / (hoursSincePosting + 5)^0.7
             const rating = v.views / (Math.pow(hoursSincePosting + 5, 0.7));
             return {...v, rating: rating || 0 };
-        })
-        .sort((a, b) => b.rating - a.rating);
-      setAllVideos(refreshedAndSorted);
+        });
+      setAllVideos(refreshedAndSorted); // Ratings updated, but not sorted by new sortOption yet. Sorting handled by memoizedFilteredVideos.
       setIsLoading(false);
-      return; // Return to prevent API call
+      return;
     }
 
-    // Proceed to fetch from API if not using existing data or if forceRefresh is true
     try {
       const videoPromises = channels.map(channel => fetchVideosForChannel(channel, currentApiKey));
       const results = await Promise.allSettled(videoPromises);
@@ -142,43 +158,37 @@ export default function Home() {
       });
       
       if (fetchedVideos.length === 0 && fetchErrorOccurred && channels.length > 0) {
-        // setError is already populated from above
+        // setError is already populated
       } else if (fetchedVideos.length === 0 && channels.length > 0 && !fetchErrorOccurred) {
         toast({ title: "No Videos Found", description: "The selected channels might not have any (non-Short) videos, or feeds are empty." });
       }
 
       const uniqueVideos = Array.from(new Map(fetchedVideos.map(video => [video.id, video])).values());
-      const sortedVideos = uniqueVideos.sort((a, b) => b.rating - a.rating);
-      setAllVideos(sortedVideos);
+      setAllVideos(uniqueVideos); // Sorting handled by memoizedFilteredVideos
 
     } catch (e) {
       console.error("Error aggregating videos:", e);
       const message = e instanceof Error ? e.message : "An unknown error occurred during video aggregation.";
       setError(message);
-      setAllVideos([]); // Clear videos on major aggregation error
+      setAllVideos([]);
     } finally {
       setIsLoading(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channels, fetchVideosForChannel, apiKey, allVideos, setAllVideos]); // Added allVideos and setAllVideos to dependency array
+  }, [channels, fetchVideosForChannel, apiKey, allVideos, setAllVideos]);
 
 
   useEffect(() => {
-    // This effect handles initial load and changes to critical dependencies (API key, channels)
     if (apiKey && channels.length > 0) {
-        // Automatically fetch/refresh if API key and channels are present
-        // aggregateAndSortVideos will use cached data if appropriate
         aggregateAndSortVideos(false); 
     } else if (!apiKey && channels.length > 0) {
         setError("YouTube API Key is not set. Please add it in the Channel Setup panel to fetch videos.");
         setAllVideos([]);
-    } else if (channels.length === 0) { // Handles case where API key might exist but no channels
+    } else if (channels.length === 0) {
         setAllVideos([]);
         setError(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channels, apiKey]); // Removed aggregateAndSortVideos from here to prevent re-runs based on its own identity change.
-                           // It's called explicitly or based on its own internal logic.
+  }, [channels, apiKey]); // Not aggregateAndSortVideos, to avoid loops.
 
   const handleRefreshVideos = () => {
     if (!apiKey) {
@@ -186,12 +196,63 @@ export default function Home() {
       return;
     }
     toast({ title: "Refreshing Videos...", description: "Fetching the latest videos from all channels." });
-    aggregateAndSortVideos(true); // Pass true to force refresh from API
+    aggregateAndSortVideos(true);
   }
 
   const memoizedFilteredVideos = useMemo(() => {
-    return allVideos.filter(video => !isVideoWatched(video.id));
-  }, [allVideos, isVideoWatched]);
+    let filtered = allVideos.filter(video => !isVideoWatched(video.id));
+
+    if (isMobile) {
+      filtered = filtered.filter(video => !isVideoHiddenOnMobile(video.id));
+    }
+
+    // Duration Filter
+    if (durationFilter !== 'all') {
+      filtered = filtered.filter(video => {
+        const duration = video.durationSeconds;
+        if (durationFilter === 'short') return duration < 600; // < 10 min
+        if (durationFilter === 'medium') return duration >= 600 && duration <= 1800; // 10-30 min
+        if (durationFilter === 'long') return duration > 1800; // > 30 min
+        return true;
+      });
+    }
+
+    // Watch Later Filter
+    if (watchLaterFilter === 'watchLaterOnly') {
+        filtered = filtered.filter(video => isVideoWatchLater(video.id));
+    } else if (watchLaterFilter === 'notWatchLater') {
+        filtered = filtered.filter(video => !isVideoWatchLater(video.id));
+    }
+
+
+    // Sorting
+    return [...filtered].sort((a, b) => {
+      const valA = a[sortOption.property];
+      const valB = b[sortOption.property];
+
+      let comparison = 0;
+      if (typeof valA === 'number' && typeof valB === 'number') {
+        comparison = valA - valB;
+      } else if (typeof valA === 'string' && typeof valB === 'string') {
+        comparison = valA.localeCompare(valB);
+      } else if (sortOption.property === 'publishedDate') {
+        comparison = new Date(valA as string).getTime() - new Date(valB as string).getTime();
+      }
+      
+      return sortOption.direction === 'asc' ? comparison : -comparison;
+    });
+  }, [allVideos, isVideoWatched, isMobile, isVideoHiddenOnMobile, durationFilter, watchLaterFilter, sortOption, isVideoWatchLater]);
+
+  const stats = useMemo(() => {
+    const totalUnwatched = memoizedFilteredVideos.length;
+    const averageRating = totalUnwatched > 0 
+      ? memoizedFilteredVideos.reduce((sum, video) => sum + video.rating, 0) / totalUnwatched
+      : 0;
+    return {
+      totalUnwatched,
+      averageRating: averageRating.toFixed(2)
+    };
+  }, [memoizedFilteredVideos]);
 
 
   return (
@@ -217,7 +278,7 @@ export default function Home() {
       </aside>
       <Separator orientation="vertical" className="hidden md:block h-auto sticky top-0" />
       <main className="flex-1 md:overflow-y-auto">
-        {!apiKey && channels.length > 0 && ( // Show only if channels are added but API key is missing
+        {!apiKey && channels.length > 0 && (
           <Alert variant="default" className="m-6 bg-primary/10 border-primary/30">
             <Info className="h-4 w-4 text-primary" />
             <AlertTitle className="text-primary">API Key Needed</AlertTitle>
@@ -231,10 +292,21 @@ export default function Home() {
           videos={memoizedFilteredVideos}
           onMarkAsWatched={addWatchedVideo}
           watchedVideoIds={watchedVideoIds}
-          isLoading={isLoading && !!apiKey} // Only show loading if API key is set
+          isLoading={isLoading && !!apiKey}
           error={error}
           hasChannels={channels.length > 0}
           apiKeyIsSet={!!apiKey}
+          sortOption={sortOption}
+          onSortChange={setSortOption}
+          durationFilter={durationFilter}
+          onDurationFilterChange={setDurationFilter}
+          watchLaterFilter={watchLaterFilter}
+          onWatchLaterFilterChange={setWatchLaterFilter}
+          stats={stats}
+          onToggleWatchLater={toggleWatchLater}
+          watchLaterVideoIds={watchLaterVideoIds}
+          onHideOnMobile={addHiddenOnMobileVideo}
+          isMobile={isMobile}
         />
       </main>
     </div>

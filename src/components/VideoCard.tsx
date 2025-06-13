@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { Video } from '@/types';
@@ -5,7 +6,7 @@ import Image from 'next/image';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Eye, ExternalLink, CalendarDays, BarChart3, YoutubeIcon } from 'lucide-react'; // Changed BarChart to BarChart3 for consistency
+import { Eye, ExternalLink, CalendarDays, BarChart3, YoutubeIcon, ListPlus, ListX, XCircle } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useState, useEffect } from 'react';
@@ -14,9 +15,13 @@ interface VideoCardProps {
   video: Video;
   onMarkAsWatched: (videoId: string) => void;
   isWatched: boolean;
+  onToggleWatchLater: (videoId: string, videoTitle: string) => void;
+  isWatchLater: boolean;
+  onHideOnMobile: (videoId: string, videoTitle: string) => void;
+  isMobile: boolean;
 }
 
-export default function VideoCard({ video, onMarkAsWatched, isWatched }: VideoCardProps) {
+export default function VideoCard({ video, onMarkAsWatched, isWatched, onToggleWatchLater, isWatchLater, onHideOnMobile, isMobile }: VideoCardProps) {
   const [showCard, setShowCard] = useState(!isWatched);
   const [publishedTimeAgo, setPublishedTimeAgo] = useState('');
 
@@ -37,7 +42,20 @@ export default function VideoCard({ video, onMarkAsWatched, isWatched }: VideoCa
     }, 300); 
   };
 
-  if (!showCard && isWatched) {
+  const handleToggleWatchLater = () => {
+    onToggleWatchLater(video.id, video.title);
+  };
+
+  const handleHideOnMobile = (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent card click or other actions
+    e.preventDefault();
+    setShowCard(false);
+    setTimeout(() => {
+     onHideOnMobile(video.id, video.title);
+    }, 300)
+  }
+
+  if (!showCard && (isWatched || (isMobile /* && isHiddenOnMobile - this logic is handled by parent filter now */))) {
      return null; 
   }
 
@@ -46,10 +64,22 @@ export default function VideoCard({ video, onMarkAsWatched, isWatched }: VideoCa
       className={cn(
         "flex flex-col overflow-hidden shadow-lg hover:shadow-primary/50 transition-all duration-300 ease-in-out transform hover:-translate-y-1",
         !showCard ? "opacity-0 scale-95" : "opacity-100 scale-100",
-        "bg-card border-border"
+        "bg-card border-border relative"
       )}
       style={{ transitionProperty: 'opacity, transform, box-shadow' }}
     >
+      {isMobile && (
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          className="absolute top-1 right-1 z-10 h-7 w-7 bg-black/50 hover:bg-black/70 text-white hover:text-red-400"
+          onClick={handleHideOnMobile}
+          aria-label="Remove from view on mobile"
+          title="Remove from view on mobile"
+        >
+          <XCircle className="h-5 w-5" />
+        </Button>
+      )}
       <CardHeader className="p-0 relative">
         <a href={video.link} target="_blank" rel="noopener noreferrer" aria-label={`Watch ${video.title} on YouTube`}>
           <Image
@@ -59,7 +89,6 @@ export default function VideoCard({ video, onMarkAsWatched, isWatched }: VideoCa
             height={270}
             className="w-full h-auto object-cover aspect-video"
             data-ai-hint="video thumbnail"
-            // unoptimized={true} // Already set globally in next.config.js
           />
         </a>
       </CardHeader>
@@ -83,17 +112,28 @@ export default function VideoCard({ video, onMarkAsWatched, isWatched }: VideoCa
             <span>{video.views.toLocaleString()} views</span>
           </div>
         </div>
-        <Badge variant="secondary" className="font-mono text-xs" title={`Calculated Rating: ${video.rating.toFixed(4)}`}>
+        <div className="flex items-center text-xs text-muted-foreground mb-1" title="Duration">
+           <span className="mr-1">⏱️</span> {/* Simple clock emoji for duration */}
+           <span>
+             {Math.floor(video.durationSeconds / 60)}m {video.durationSeconds % 60}s
+           </span>
+        </div>
+        <Badge variant="secondary" className="font-mono text-xs mt-2" title={`Calculated Rating: ${video.rating.toFixed(4)}`}>
           Rating: {video.rating.toFixed(2)}
         </Badge>
       </CardContent>
-      <CardFooter className="p-4 pt-0 flex justify-between items-center">
-        <Button onClick={handleMarkWatched} variant="outline" size="sm">
-          <Eye className="mr-2 h-4 w-4" /> Mark Watched
+      <CardFooter className="p-4 pt-0 grid grid-cols-2 gap-2 items-center">
+        <Button onClick={handleMarkWatched} variant="outline" size="sm" className="w-full">
+          <Eye className="mr-2 h-4 w-4" /> Watched
         </Button>
-        <Button asChild variant="default" size="sm">
+        <Button onClick={handleToggleWatchLater} variant={isWatchLater ? "secondary" : "outline"} size="sm" className="w-full">
+          {isWatchLater ? <ListX className="mr-2 h-4 w-4" /> : <ListPlus className="mr-2 h-4 w-4" />}
+          {isWatchLater ? 'Unlist' : 'Later'}
+        </Button>
+        <Button asChild variant="default" size="sm" className="col-span-2 w-full">
           <a href={video.link} target="_blank" rel="noopener noreferrer">
-            Watch <ExternalLink className="ml-2 h-4 w-4" />
+            Watch on <YoutubeIcon className="ml-2 h-4 w-4" />
+            <ExternalLink className="ml-1 h-3 w-3" />
           </a>
         </Button>
       </CardFooter>
