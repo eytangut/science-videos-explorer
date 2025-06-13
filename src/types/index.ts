@@ -1,7 +1,7 @@
 export interface Channel {
-  id: string; // RSS feed URL used as ID
+  id: string; // YouTube Channel ID (e.g., UCxxxxxxxxxxxx)
   name: string;
-  rssUrl: string;
+  youtubeChannelId: string; // Explicitly store YouTube Channel ID
 }
 
 export interface Video {
@@ -12,20 +12,69 @@ export interface Video {
   publishedDate: string; // ISO string
   views: number;
   channelName: string;
-  channelRssUrl: string; // To identify the source channel
+  channelId: string; // YouTube Channel ID of the video's channel
   rating: number;
+  durationSeconds: number; // Video duration in seconds
 }
 
-export interface ParsedVideoItem {
+// Types for YouTube API responses (simplified)
+export interface YouTubeChannelDetails {
   id: string;
-  title: string;
-  link: string;
-  publishedDate: string;
-  views: number;
-  thumbnailUrl:string;
+  snippet: {
+    title: string;
+    customUrl?: string;
+  };
+  contentDetails: {
+    relatedPlaylists: {
+      uploads: string; // Playlist ID for uploads
+    };
+  };
 }
 
-export interface ParsedFeed {
-  channelTitle: string;
-  videos: ParsedVideoItem[];
+export interface YouTubePlaylistItem {
+  snippet: {
+    publishedAt: string;
+    channelId: string;
+    title:string;
+    description: string;
+    thumbnails: {
+      medium: { url: string };
+      high?: { url: string };
+      standard?: { url: string };
+      maxres?: { url: string };
+    };
+    resourceId: {
+      videoId: string;
+    };
+    channelTitle: string;
+  };
+  contentDetails: {
+    videoId: string;
+    videoPublishedAt: string; // May differ from playlist item publish date
+  };
+}
+
+export interface YouTubeVideoDetails {
+  id: string;
+  snippet: {
+    publishedAt: string;
+    channelId: string;
+    title: string;
+    description: string;
+    thumbnails: {
+      medium: { url: string };
+      high?: { url: string };
+      standard?: { url: string };
+      maxres?: { url: string };
+    };
+    channelTitle: string;
+  };
+  contentDetails: {
+    duration: string; // ISO 8601 duration (e.g., PT1M30S)
+  };
+  statistics: {
+    viewCount: string; // Note: it's a string
+    likeCount?: string;
+    commentCount?: string;
+  };
 }

@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Eye, ExternalLink, CalendarDays, BarChart3 } from 'lucide-react';
+import { Eye, ExternalLink, CalendarDays, BarChart3, YoutubeIcon } from 'lucide-react'; // Changed BarChart to BarChart3 for consistency
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useState, useEffect } from 'react';
@@ -21,31 +21,32 @@ export default function VideoCard({ video, onMarkAsWatched, isWatched }: VideoCa
   const [publishedTimeAgo, setPublishedTimeAgo] = useState('');
 
   useEffect(() => {
-    // Defer date calculation to client-side to avoid hydration mismatch
     try {
       setPublishedTimeAgo(formatDistanceToNow(new Date(video.publishedDate), { addSuffix: true }));
     } catch (e) {
+      console.error("Error formatting date:", e, video.publishedDate);
       setPublishedTimeAgo('Invalid date');
     }
   }, [video.publishedDate]);
 
 
   const handleMarkWatched = () => {
-    setShowCard(false); // Start fade-out animation
+    setShowCard(false); 
     setTimeout(() => {
-      onMarkAsWatched(video.id); // Actual state update after animation
-    }, 300); // Match transition duration
+      onMarkAsWatched(video.id); 
+    }, 300); 
   };
 
-  if (!showCard && isWatched) { // if it's already marked as watched and we want to animate out, or it's just hidden
-     return null; // Render nothing if marked watched and animation finished or if initially hidden
+  if (!showCard && isWatched) {
+     return null; 
   }
 
   return (
     <Card 
       className={cn(
         "flex flex-col overflow-hidden shadow-lg hover:shadow-primary/50 transition-all duration-300 ease-in-out transform hover:-translate-y-1",
-        !showCard ? "opacity-0 scale-95" : "opacity-100 scale-100"
+        !showCard ? "opacity-0 scale-95" : "opacity-100 scale-100",
+        "bg-card border-border"
       )}
       style={{ transitionProperty: 'opacity, transform, box-shadow' }}
     >
@@ -57,19 +58,22 @@ export default function VideoCard({ video, onMarkAsWatched, isWatched }: VideoCa
             width={480}
             height={270}
             className="w-full h-auto object-cover aspect-video"
-            unoptimized={video.thumbnailUrl?.includes('ytimg.com')} // Common for YouTube thumbnails
             data-ai-hint="video thumbnail"
+            // unoptimized={true} // Already set globally in next.config.js
           />
         </a>
       </CardHeader>
       <CardContent className="p-4 flex-grow">
         <a href={video.link} target="_blank" rel="noopener noreferrer" className="hover:text-primary">
-          <CardTitle className="text-lg font-headline mb-2 leading-tight line-clamp-2">{video.title}</CardTitle>
+          <CardTitle className="text-lg font-headline mb-2 leading-tight line-clamp-2 text-card-foreground">{video.title}</CardTitle>
         </a>
-        <p className="text-sm text-muted-foreground mb-1 line-clamp-1" title={video.channelName}>
-          {video.channelName}
-        </p>
-        <div className="flex items-center text-xs text-muted-foreground mb-2 space-x-2">
+        <div className="flex items-center text-sm text-muted-foreground mb-1">
+          <YoutubeIcon className="h-4 w-4 mr-1.5 text-red-600"/> 
+          <p className="line-clamp-1" title={video.channelName}>
+            {video.channelName}
+          </p>
+        </div>
+        <div className="flex items-center text-xs text-muted-foreground mb-3 space-x-3">
           <div className="flex items-center" title="Published date">
             <CalendarDays className="h-3.5 w-3.5 mr-1" />
             <span>{publishedTimeAgo || 'Loading time...'}</span>
@@ -79,7 +83,7 @@ export default function VideoCard({ video, onMarkAsWatched, isWatched }: VideoCa
             <span>{video.views.toLocaleString()} views</span>
           </div>
         </div>
-        <Badge variant="secondary" className="font-mono text-xs" title="Calculated Rating">
+        <Badge variant="secondary" className="font-mono text-xs" title={`Calculated Rating: ${video.rating.toFixed(4)}`}>
           Rating: {video.rating.toFixed(2)}
         </Badge>
       </CardContent>

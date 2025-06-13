@@ -10,7 +10,7 @@ export function useChannels() {
   const [channels, setChannels] = useLocalStorage<Channel[]>(CHANNELS_STORAGE_KEY, []);
 
   const addChannel = (newChannel: Channel) => {
-    if (channels.find(channel => channel.rssUrl === newChannel.rssUrl)) {
+    if (channels.find(channel => channel.id === newChannel.id)) {
       toast({
         title: "Channel exists",
         description: `${newChannel.name} is already in your list.`,
@@ -22,8 +22,9 @@ export function useChannels() {
     return true;
   };
 
-  const removeChannel = (rssUrl: string) => {
-    setChannels(prevChannels => prevChannels.filter(channel => channel.rssUrl !== rssUrl));
+  const removeChannel = (channelId: string) => {
+    setChannels(prevChannels => prevChannels.filter(channel => channel.id !== channelId));
+    toast({ title: "Channel Removed", description: "The channel has been removed from your list." });
   };
 
   const reorderChannels = (sourceIndex: number, destinationIndex: number) => {
