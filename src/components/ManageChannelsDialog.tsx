@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { Channel } from '@/types';
@@ -12,6 +13,7 @@ interface ManageChannelsDialogProps {
   onReorderChannels: (sourceIndex: number, destinationIndex: number) => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  isClientMounted: boolean;
 }
 
 export default function ManageChannelsDialog({
@@ -20,6 +22,7 @@ export default function ManageChannelsDialog({
   onReorderChannels,
   open,
   onOpenChange,
+  isClientMounted
 }: ManageChannelsDialogProps) {
   
   const handleMove = (index: number, direction: 'up' | 'down') => {
@@ -33,7 +36,7 @@ export default function ManageChannelsDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
-        <Button variant="outline">
+        <Button variant="outline" disabled={!isClientMounted}>
             <Settings className="mr-2 h-5 w-5" /> Manage Added Channels
         </Button>
       </DialogTrigger>
@@ -41,7 +44,9 @@ export default function ManageChannelsDialog({
         <DialogHeader>
           <DialogTitle className="text-2xl font-headline">Manage Your Channels</DialogTitle>
         </DialogHeader>
-        {channels.length === 0 ? (
+        {!isClientMounted ? (
+          <p className="text-muted-foreground py-4">Loading channel list...</p>
+        ) : channels.length === 0 ? (
           <p className="text-muted-foreground py-4">No channels added yet. Add one using the panel.</p>
         ) : (
           <ScrollArea className="max-h-[60vh] pr-3 my-4">
@@ -74,3 +79,4 @@ export default function ManageChannelsDialog({
     </Dialog>
   );
 }
+

@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { ChangeEvent, FormEvent } from 'react';
@@ -9,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { toast } from '@/hooks/use-toast';
 import { fetchChannelDetails } from '@/lib/youtubeDataApi';
 import { PlusCircle, KeyRound, Settings, ListRestart } from 'lucide-react';
-import ManageChannelsDialog from './ManageChannelsDialog'; // Import the new dialog
+import ManageChannelsDialog from './ManageChannelsDialog'; 
 
 interface ChannelManagementPanelProps {
   channels: Channel[];
@@ -20,6 +21,7 @@ interface ChannelManagementPanelProps {
   apiKey: string;
   onSetApiKey: (key: string) => void;
   isLoadingVideos: boolean;
+  isClientMounted: boolean; 
 }
 
 export default function ChannelManagementPanel({
@@ -30,12 +32,19 @@ export default function ChannelManagementPanel({
   onRefreshVideos,
   apiKey,
   onSetApiKey,
-  isLoadingVideos
+  isLoadingVideos,
+  isClientMounted 
 }: ChannelManagementPanelProps) {
   const [newChannelId, setNewChannelId] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [apiKeyInputValue, setApiKeyInputValue] = useState(apiKey);
   const [isManageDialogOpen, setIsManageDialogOpen] = useState(false);
+
+  // Update apiKeyInputValue if the prop apiKey changes (e.g. loaded from localStorage)
+  useState(() => {
+    setApiKeyInputValue(apiKey);
+  }, [apiKey]);
+
 
   const handleSetApiKey = () => {
     onSetApiKey(apiKeyInputValue);
@@ -54,15 +63,10 @@ export default function ChannelManagementPanel({
     }
     setIsAdding(true);
     try {
-      // Attempt to parse channel ID from URL if a URL is pasted.
-      // Basic parsing, focuses on /channel/ and /@handle formats for simplicity.
       let processedChannelId = newChannelId.trim();
       if (processedChannelId.includes('youtube.com/channel/')) {
         processedChannelId = processedChannelId.split('youtube.com/channel/')[1].split('/')[0].split('?')[0];
       } else if (processedChannelId.includes('youtube.com/@')) {
-        // Fetching by handle requires an additional API step (search or custom logic) not implemented here for brevity.
-        // For now, we'll assume if it's a handle, it's passed as the ID and fetchChannelDetails will try it.
-        // A more robust solution would use the Search API to convert handle to channel ID.
         processedChannelId = processedChannelId.split('youtube.com/@')[1].split('/')[0].split('?')[0];
          toast({ title: "Using Handle", description: `Attempting to use "${processedChannelId}" as channel identifier. For best results, use the Channel ID (starts with UC).`, variant: "default" });
       }
@@ -98,7 +102,13 @@ export default function ChannelManagementPanel({
       <CardHeader>
         <CardTitle className="text-2xl font-headline flex items-center justify-between">
           <span>Channel Setup</span>
-          <Button onClick={onRefreshVideos} variant="ghost" size="icon" aria-label="Refresh Videos" disabled={isLoadingVideos || !apiKey || channels.length === 0}>
+          <Button 
+            onClick={onRefreshVideos} 
+            variant="ghost" 
+            size="icon" 
+            aria-label="Refresh Videos" 
+            disabled={!isClientMounted || isLoadingVideos || !apiKey || channels.length === 0}
+          >
             <ListRestart className="h-5 w-5 text-primary" />
           </Button>
         </CardTitle>
@@ -114,8 +124,9 @@ export default function ChannelManagementPanel({
               value={apiKeyInputValue}
               onChange={(e: ChangeEvent<HTMLInputElement>) => setApiKeyInputValue(e.target.value)}
               aria-label="YouTube API Key"
+              disabled={!isClientMounted}
             />
-            <Button onClick={handleSetApiKey} aria-label="Save API Key">
+            <Button onClick={handleSetApiKey} aria-label="Save API Key" disabled={!isClientMounted}>
               <KeyRound className="mr-2 h-5 w-5" /> Save Key
             </Button>
           </div>
@@ -134,14 +145,14 @@ export default function ChannelManagementPanel({
               placeholder="Enter Channel ID (e.g., UC...)"
               value={newChannelId}
               onChange={(e: ChangeEvent<HTMLInputElement>) => setNewChannelId(e.target.value)}
-              disabled={isAdding || !apiKey}
+              disabled={!isClientMounted || isAdding || !apiKey}
               aria-label="New Channel ID"
             />
-            <Button type="submit" disabled={isAdding || !apiKey} aria-label="Add Channel">
+            <Button type="submit" disabled={!isClientMounted || isAdding || !apiKey} aria-label="Add Channel">
               <PlusCircle className="mr-2 h-5 w-5" /> {isAdding ? 'Adding...' : 'Add'}
             </Button>
           </div>
-          {!apiKey && <p className="text-xs text-destructive">API Key is required to add channels.</p>}
+          {isClientMounted && !apiKey && <p className="text-xs text-destructive">API Key is required to add channels.</p>}
         </form>
         
         <ManageChannelsDialog
@@ -150,9 +161,11 @@ export default function ChannelManagementPanel({
             onReorderChannels={onReorderChannels}
             open={isManageDialogOpen}
             onOpenChange={setIsManageDialogOpen}
+            isClientMounted={isClientMounted}
         />
 
       </CardContent>
     </Card>
   );
 }
+

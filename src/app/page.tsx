@@ -186,7 +186,28 @@ export default function Home() {
     if (!isClientMounted) return; // Don't run initial fetch logic until client is mounted
 
     if (apiKey && channels.length > 0) {
-        aggregateAndSortVideos(false); 
+        // Check if all current channels have some videos in the cache
+        const currentChannelIds = new Set(channels.map(c => c.youtubeChannelId));
+        const videosFromCurrentChannelsInCache = allVideos.filter(v => currentChannelIds.has(v.channelId));
+        const allChannelsRepresentedInCache = channels.every(c => videosFromCurrentChannelsInCache.some(v => v.channelId === c.youtubeChannelId));
+
+        if (!allChannelsRepresentedInCache && allVideos.length > 0) {
+          // Some channels might be new, or cache is stale regarding channel list
+           aggregateAndSortVideos(false); // Fetch if necessary, but prefer cache if possible for existing channels
+        } else if (allVideos.length === 0){
+           aggregateAndSortVideos(false); // No videos at all, fetch
+        } else {
+            // Existing data seems fine for current channels, just update ratings
+            const refreshedAndSorted = allVideos
+              .filter(v => currentChannelIds.has(v.channelId)) // ensure we only process videos from current channels
+              .map(v => { 
+                  const publishedDate = new Date(v.publishedDate);
+                  const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDate.getTime()) / (1000 * 60 * 60));
+                  const rating = v.views / (Math.pow(hoursSincePosting + 5, 0.7));
+                  return {...v, rating: rating || 0 };
+              });
+            setAllVideos(refreshedAndSorted);
+        }
     } else if (!apiKey && channels.length > 0) {
         setError("YouTube API Key is not set. Please add it in the Channel Setup panel to fetch videos.");
         setAllVideos([]);
@@ -285,6 +306,7 @@ export default function Home() {
           apiKey={apiKey}
           onSetApiKey={handleSetApiKey}
           isLoadingVideos={isLoading}
+          isClientMounted={isClientMounted}
         />
       </aside>
       <Separator orientation="vertical" className="hidden md:block h-auto sticky top-0" />
