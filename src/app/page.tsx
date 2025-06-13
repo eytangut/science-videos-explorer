@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useCallback, useEffect, useState, useMemo } from 'react';
@@ -17,16 +18,18 @@ import { Info } from 'lucide-react';
 export default function Home() {
   const { channels, addChannel, removeChannel, reorderChannels } = useChannels();
   const { watchedVideoIds, addWatchedVideo, isVideoWatched } = useWatchedVideos();
-  const [allVideos, setAllVideos] = useState<Video[]>([]);
+  const [allVideos, setAllVideos] = useLocalStorage<Video[]>('allVideosCache', []);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [apiKey, setApiKey] = useLocalStorage<string>('youtubeApiKey', '');
 
   const handleSetApiKey = (newApiKey: string) => {
     setApiKey(newApiKey);
-    // Optionally, trigger a refresh or provide feedback
     if (newApiKey && channels.length > 0) {
-      aggregateAndSortVideos(true, newApiKey);
+      aggregateAndSortVideos(false, newApiKey); // Fetch if API key is now valid and channels exist
+    } else if (!newApiKey) {
+      setAllVideos([]); // Clear videos if API key is removed
+      setError("API Key removed. Please set your YouTube API Key to fetch videos.");
     }
   };
 
@@ -40,7 +43,7 @@ export default function Home() {
       throw new Error(`Could not find uploads playlist for channel: ${channel.name}`);
     }
 
-    const playlistItems: YouTubePlaylistItem[] = await fetchPlaylistVideos(currentApiKey, uploadsPlaylistId, 20); // Fetch more items
+    const playlistItems: YouTubePlaylistItem[] = await fetchPlaylistVideos(currentApiKey, uploadsPlaylistId, 20);
     
     const videoIds = playlistItems.map(item => item.contentDetails.videoId).filter(id => !!id);
     if (videoIds.length === 0) return [];
@@ -56,14 +59,12 @@ export default function Home() {
         const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDate.getTime()) / (1000 * 60 * 60));
         const views = parseInt(details.statistics.viewCount, 10) || 0;
         
-        // New rating: views / (hoursSincePosting + 5)^0.7
         const rating = views / (Math.pow(hoursSincePosting + 5, 0.7));
         
         const durationSeconds = parseISO8601Duration(details.contentDetails.duration);
 
-        // Filter out shorts (duration <= 60 seconds)
         if (durationSeconds <= 60) {
-          return null;
+          return null; // Filter out shorts
         }
 
         return {
@@ -86,12 +87,12 @@ export default function Home() {
   const aggregateAndSortVideos = useCallback(async (forceRefresh = false, currentApiKey = apiKey) => {
     if (!currentApiKey) {
       setError("YouTube API Key is not set. Please add it in the Channel Setup panel to fetch videos.");
-      setAllVideos([]);
+      setAllVideos([]); // Clear videos if no API key
       setIsLoading(false);
       return;
     }
     if (channels.length === 0) {
-      setAllVideos([]);
+      setAllVideos([]); // Clear videos if no channels
       setError(null);
       setIsLoading(false);
       return;
@@ -99,24 +100,31 @@ export default function Home() {
 
     setIsLoading(true);
     setError(null);
-    try {
-      if (!forceRefresh && allVideos.length > 0 &&
-          channels.every(c => allVideos.some(v => v.channelId === c.youtubeChannelId)) &&
-          allVideos.length >= channels.length 
-         ) {
-         const refreshedAndSorted = allVideos
-            .map(v => { 
-                const publishedDate = new Date(v.publishedDate);
-                const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDate.getTime()) / (1000 * 60 * 60));
-                const rating = v.views / (Math.pow(hoursSincePosting + 5, 0.7));
-                return {...v, rating: rating || 0 };
-            })
-            .sort((a, b) => b.rating - a.rating);
-         setAllVideos(refreshedAndSorted);
-         setIsLoading(false);
-         return;
-      }
 
+    // Check if we can use existing data (cache)
+    const canUseExistingData = !forceRefresh && allVideos.length > 0 &&
+      channels.every(c => allVideos.some(v => v.channelId === c.youtubeChannelId));
+
+    if (canUseExistingData) {
+      const currentChannelIds = new Set(channels.map(c => c.youtubeChannelId));
+      const videosFromCurrentChannels = allVideos.filter(v => currentChannelIds.has(v.channelId));
+
+      const refreshedAndSorted = videosFromCurrentChannels
+        .map(v => { 
+            const publishedDate = new Date(v.publishedDate);
+            const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDate.getTime()) / (1000 * 60 * 60));
+            // Rating uses views / (hoursSincePosting + 5)^0.7
+            const rating = v.views / (Math.pow(hoursSincePosting + 5, 0.7));
+            return {...v, rating: rating || 0 };
+        })
+        .sort((a, b) => b.rating - a.rating);
+      setAllVideos(refreshedAndSorted);
+      setIsLoading(false);
+      return; // Return to prevent API call
+    }
+
+    // Proceed to fetch from API if not using existing data or if forceRefresh is true
+    try {
       const videoPromises = channels.map(channel => fetchVideosForChannel(channel, currentApiKey));
       const results = await Promise.allSettled(videoPromises);
       
@@ -134,9 +142,9 @@ export default function Home() {
       });
       
       if (fetchedVideos.length === 0 && fetchErrorOccurred && channels.length > 0) {
-        // setError is already populated
+        // setError is already populated from above
       } else if (fetchedVideos.length === 0 && channels.length > 0 && !fetchErrorOccurred) {
-        toast({ title: "No Videos Found", description: "The selected channels might not have any (non-Short) videos or feeds are empty." });
+        toast({ title: "No Videos Found", description: "The selected channels might not have any (non-Short) videos, or feeds are empty." });
       }
 
       const uniqueVideos = Array.from(new Map(fetchedVideos.map(video => [video.id, video])).values());
@@ -147,26 +155,30 @@ export default function Home() {
       console.error("Error aggregating videos:", e);
       const message = e instanceof Error ? e.message : "An unknown error occurred during video aggregation.";
       setError(message);
-      setAllVideos([]);
+      setAllVideos([]); // Clear videos on major aggregation error
     } finally {
       setIsLoading(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channels, fetchVideosForChannel, allVideos, apiKey]);
+  }, [channels, fetchVideosForChannel, apiKey, allVideos, setAllVideos]); // Added allVideos and setAllVideos to dependency array
 
 
   useEffect(() => {
+    // This effect handles initial load and changes to critical dependencies (API key, channels)
     if (apiKey && channels.length > 0) {
-        aggregateAndSortVideos();
+        // Automatically fetch/refresh if API key and channels are present
+        // aggregateAndSortVideos will use cached data if appropriate
+        aggregateAndSortVideos(false); 
     } else if (!apiKey && channels.length > 0) {
         setError("YouTube API Key is not set. Please add it in the Channel Setup panel to fetch videos.");
         setAllVideos([]);
-    } else if (apiKey && channels.length === 0) {
-        setAllVideos([]); // Clear videos if API key exists but no channels
+    } else if (channels.length === 0) { // Handles case where API key might exist but no channels
+        setAllVideos([]);
         setError(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channels, apiKey]); // Rerun when channels list or API key changes.
+  }, [channels, apiKey]); // Removed aggregateAndSortVideos from here to prevent re-runs based on its own identity change.
+                           // It's called explicitly or based on its own internal logic.
 
   const handleRefreshVideos = () => {
     if (!apiKey) {
@@ -174,7 +186,7 @@ export default function Home() {
       return;
     }
     toast({ title: "Refreshing Videos...", description: "Fetching the latest videos from all channels." });
-    aggregateAndSortVideos(true); // Pass true to force refresh
+    aggregateAndSortVideos(true); // Pass true to force refresh from API
   }
 
   const memoizedFilteredVideos = useMemo(() => {
@@ -205,7 +217,7 @@ export default function Home() {
       </aside>
       <Separator orientation="vertical" className="hidden md:block h-auto sticky top-0" />
       <main className="flex-1 md:overflow-y-auto">
-        {!apiKey && (
+        {!apiKey && channels.length > 0 && ( // Show only if channels are added but API key is missing
           <Alert variant="default" className="m-6 bg-primary/10 border-primary/30">
             <Info className="h-4 w-4 text-primary" />
             <AlertTitle className="text-primary">API Key Needed</AlertTitle>
@@ -219,7 +231,7 @@ export default function Home() {
           videos={memoizedFilteredVideos}
           onMarkAsWatched={addWatchedVideo}
           watchedVideoIds={watchedVideoIds}
-          isLoading={isLoading && !!apiKey}
+          isLoading={isLoading && !!apiKey} // Only show loading if API key is set
           error={error}
           hasChannels={channels.length > 0}
           apiKeyIsSet={!!apiKey}
