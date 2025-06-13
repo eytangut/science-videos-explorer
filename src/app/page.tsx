@@ -41,6 +41,11 @@ export default function Home() {
   const [sortOption, setSortOption] = useState<SortOption>({ property: 'rating', direction: 'desc' });
   const [durationFilter, setDurationFilter] = useState<DurationFilter>('all');
   const [watchLaterFilter, setWatchLaterFilter] = useState<WatchLaterFilter>('all');
+  const [isClientMounted, setIsClientMounted] = useState(false);
+
+  useEffect(() => {
+    setIsClientMounted(true);
+  }, []);
 
 
   const handleSetApiKey = (newApiKey: string) => {
@@ -178,6 +183,8 @@ export default function Home() {
 
 
   useEffect(() => {
+    if (!isClientMounted) return; // Don't run initial fetch logic until client is mounted
+
     if (apiKey && channels.length > 0) {
         aggregateAndSortVideos(false); 
     } else if (!apiKey && channels.length > 0) {
@@ -188,7 +195,7 @@ export default function Home() {
         setError(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channels, apiKey]); // Not aggregateAndSortVideos, to avoid loops.
+  }, [channels, apiKey, isClientMounted]); // Not aggregateAndSortVideos, to avoid loops. Effect also depends on isClientMounted now.
 
   const handleRefreshVideos = () => {
     if (!apiKey) {
@@ -200,6 +207,8 @@ export default function Home() {
   }
 
   const memoizedFilteredVideos = useMemo(() => {
+    if (!isClientMounted) return []; // Don't process videos until client is mounted and localStorage is synced
+
     let filtered = allVideos.filter(video => !isVideoWatched(video.id));
 
     if (isMobile) {
@@ -241,9 +250,11 @@ export default function Home() {
       
       return sortOption.direction === 'asc' ? comparison : -comparison;
     });
-  }, [allVideos, isVideoWatched, isMobile, isVideoHiddenOnMobile, durationFilter, watchLaterFilter, sortOption, isVideoWatchLater]);
+  }, [allVideos, isVideoWatched, isMobile, isVideoHiddenOnMobile, durationFilter, watchLaterFilter, sortOption, isVideoWatchLater, isClientMounted]);
 
   const stats = useMemo(() => {
+    if (!isClientMounted) return { totalUnwatched: 0, averageRating: "0.00" };
+
     const totalUnwatched = memoizedFilteredVideos.length;
     const averageRating = totalUnwatched > 0 
       ? memoizedFilteredVideos.reduce((sum, video) => sum + video.rating, 0) / totalUnwatched
@@ -252,7 +263,7 @@ export default function Home() {
       totalUnwatched,
       averageRating: averageRating.toFixed(2)
     };
-  }, [memoizedFilteredVideos]);
+  }, [memoizedFilteredVideos, isClientMounted]);
 
 
   return (
@@ -278,7 +289,7 @@ export default function Home() {
       </aside>
       <Separator orientation="vertical" className="hidden md:block h-auto sticky top-0" />
       <main className="flex-1 md:overflow-y-auto">
-        {!apiKey && channels.length > 0 && (
+        {isClientMounted && !apiKey && channels.length > 0 && (
           <Alert variant="default" className="m-6 bg-primary/10 border-primary/30">
             <Info className="h-4 w-4 text-primary" />
             <AlertTitle className="text-primary">API Key Needed</AlertTitle>
@@ -307,8 +318,11 @@ export default function Home() {
           watchLaterVideoIds={watchLaterVideoIds}
           onHideOnMobile={addHiddenOnMobileVideo}
           isMobile={isMobile}
+          isClientMounted={isClientMounted}
         />
       </main>
     </div>
   );
 }
+
+    

@@ -6,7 +6,7 @@ import VideoCard from './VideoCard';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { AlertCircle, Youtube, ListFilter, BarChartHorizontalBig, Clock, Star, SortAsc, SortDesc, Calendar, LucideIcon, CaseSensitive } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from '@/components/ui/button';
 
 type SortProperty = keyof Pick<Video, 'rating' | 'views' | 'publishedDate' | 'title'>;
@@ -36,6 +36,7 @@ interface VideoListProps {
   watchLaterVideoIds: string[];
   onHideOnMobile: (videoId: string, videoTitle: string) => void;
   isMobile: boolean;
+  isClientMounted: boolean;
 }
 
 const sortOptionsConfig: { value: SortProperty; label: string; icon: LucideIcon }[] = [
@@ -76,7 +77,8 @@ export default function VideoList({
   onToggleWatchLater,
   watchLaterVideoIds,
   onHideOnMobile,
-  isMobile
+  isMobile,
+  isClientMounted
 }: VideoListProps) {
 
   const handleSortPropertyChange = (property: string) => {
@@ -86,6 +88,22 @@ export default function VideoList({
   const toggleSortDirection = () => {
     onSortChange({ ...sortOption, direction: sortOption.direction === 'asc' ? 'desc' : 'asc' });
   };
+
+  if (!isClientMounted) { // Don't render list or loading state until client is mounted
+     return ( // Render a minimal skeleton or empty state for SSR / pre-hydration
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 p-6">
+        {Array.from({ length: 8 }).map((_, index) => (
+          <div key={index} className="bg-card p-4 rounded-lg shadow-lg animate-pulse">
+            <div className="aspect-video bg-secondary rounded mb-4"></div>
+            <div className="h-4 bg-secondary rounded w-3/4 mb-2"></div>
+            <div className="h-3 bg-secondary rounded w-1/2 mb-2"></div>
+            <div className="h-3 bg-secondary rounded w-1/4"></div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
 
   if (isLoading) {
     return (
@@ -112,10 +130,10 @@ export default function VideoList({
     );
   }
   
-  const unWatchedVideos = videos; // Filtering for watched/hiddenOnMobile is now done in page.tsx's useMemo
+  const unWatchedVideos = videos; 
 
-  if (!apiKeyIsSet && hasChannels) { // Show if API key is missing but channels are present
-     return null; // Main message shown in Home page
+  if (!apiKeyIsSet && hasChannels) { 
+     return null; 
   }
 
   if (!hasChannels && apiKeyIsSet) {
@@ -210,3 +228,5 @@ export default function VideoList({
     </ScrollArea>
   );
 }
+
+    
