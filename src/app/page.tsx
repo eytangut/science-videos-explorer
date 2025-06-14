@@ -95,9 +95,9 @@ export default function Home() {
         }
 
         const views = parseInt(details.statistics.viewCount, 10) || 0;
-        const publishedDateTime = new Date(details.snippet.publishedAt).getTime();
-        const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDateTime) / (1000 * 60 * 60)); 
-        const rating = views / (Math.pow(hoursSincePosting + 10, 0.8));
+        // const publishedDateTime = new Date(details.snippet.publishedAt).getTime();
+        // const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDateTime) / (1000 * 60 * 60)); 
+        const rating = views; // Rating is now just views
         
         return {
           id: details.id,
@@ -148,9 +148,9 @@ export default function Home() {
       const refreshedAndFiltered = videosFromCurrentChannels
         .filter(v => v.durationSeconds > 180) 
         .map(v => {
-          const publishedDateTime = new Date(v.publishedDate).getTime();
-          const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDateTime) / (1000 * 60 * 60));
-          return { ...v, rating: v.views / (Math.pow(hoursSincePosting + 10, 0.8)) };
+          // const publishedDateTime = new Date(v.publishedDate).getTime();
+          // const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDateTime) / (1000 * 60 * 60));
+          return { ...v, rating: v.views }; // Rating is now just views
         }); 
       setAllVideos(refreshedAndFiltered);
       setIsLoading(false);
@@ -216,9 +216,9 @@ export default function Home() {
               .filter(v => currentChannelIds.has(v.channelId)) 
               .filter(v => v.durationSeconds > 180)
               .map(v => {
-                const publishedDateTime = new Date(v.publishedDate).getTime();
-                const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDateTime) / (1000 * 60 * 60));
-                return { ...v, rating: v.views / (Math.pow(hoursSincePosting + 10, 0.8)) };
+                // const publishedDateTime = new Date(v.publishedDate).getTime();
+                // const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDateTime) / (1000 * 60 * 60));
+                return { ...v, rating: v.views }; // Rating is now just views
               });
             setAllVideos(refreshedAndFiltered);
         }
@@ -418,3 +418,6 @@ export default function Home() {
 
 
 
+
+
+    
