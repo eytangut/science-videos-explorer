@@ -86,8 +86,7 @@ export default function Home() {
         }
 
         const views = parseInt(details.statistics.viewCount, 10) || 0;
-        // Rating is now just the number of views
-        const rating = views;
+        const rating = views; // Rating is now just views
         
         return {
           id: details.id,
@@ -124,32 +123,37 @@ export default function Home() {
     setError(null);
 
     const currentChannelIds = new Set(channels.map(c => c.youtubeChannelId));
-    const canUseExistingData = !forceRefresh && allVideos.length > 0 &&
+    
+    // Check if cache can be used for ALL currently selected channels
+    const allChannelsHaveSomeCachedVideos = channels.every(channel => 
+      allVideos.some(video => video.channelId === channel.youtubeChannelId)
+    );
+    
+    const canUseExistingData = !forceRefresh && allVideos.length > 0 && allChannelsHaveSomeCachedVideos &&
       channels.every(c => allVideos.some(v => currentChannelIds.has(v.channelId) && v.channelId === c.youtubeChannelId));
 
-    if (canUseExistingData) {
-      const videosFromCurrentChannels = allVideos.filter(v => currentChannelIds.has(v.channelId));
 
+    if (canUseExistingData) {
+      // Use cache, but ensure it's filtered and ratings are up-to-date for current channels
+      const videosFromCurrentChannels = allVideos.filter(v => currentChannelIds.has(v.channelId));
       const refreshedAndFiltered = videosFromCurrentChannels
-        .filter(v => v.durationSeconds > 180) // Filter out videos <= 3 minutes
-        .map(v => { 
-            // Rating is now just views, no need to recalculate based on time
-            return {...v, rating: v.views };
-        });
+        .filter(v => v.durationSeconds > 180) // Ensure shorts are filtered
+        .map(v => ({ ...v, rating: v.views })); // Ensure rating is just views
       setAllVideos(refreshedAndFiltered);
       setIsLoading(false);
       return;
     }
 
+    // Fetch from API
     try {
       const videoPromises = channels.map(channel => fetchVideosForChannel(channel, currentApiKey));
       const results = await Promise.allSettled(videoPromises);
       
-      const fetchedVideos: Video[] = [];
+      const fetchedVideosFromAPI: Video[] = [];
       let fetchErrorOccurred = false;
       results.forEach((result, index) => {
         if (result.status === 'fulfilled') {
-          fetchedVideos.push(...result.value);
+          fetchedVideosFromAPI.push(...result.value);
         } else {
           console.error(`Error fetching videos for ${channels[index].name}:`, result.reason);
           const reasonMessage = result.reason instanceof Error ? result.reason.message : String(result.reason);
@@ -158,22 +162,23 @@ export default function Home() {
         }
       });
       
-      if (fetchedVideos.length === 0 && fetchErrorOccurred && channels.length > 0) {
-        // setError is already populated
-      } else if (fetchedVideos.length === 0 && channels.length > 0 && !fetchErrorOccurred) {
+      if (fetchedVideosFromAPI.length === 0 && fetchErrorOccurred && channels.length > 0) {
+        // Error already set
+      } else if (fetchedVideosFromAPI.length === 0 && channels.length > 0 && !fetchErrorOccurred) {
         toast({ title: "No Videos Found", description: "The selected channels might not have any videos longer than 3 minutes, or feeds are empty." });
       }
-
-      const uniqueVideosFromAPI = Array.from(new Map(fetchedVideos.map(video => [video.id, video])).values());
-      // Safeguard filter: ensure videos <= 3 min are removed even if fetchVideosForChannel missed any
+      
+      // Filter out any shorts missed by fetchVideosForChannel (safeguard) and ensure unique
+      const uniqueVideosFromAPI = Array.from(new Map(fetchedVideosFromAPI.map(video => [video.id, video])).values());
       const finalUniqueVideos = uniqueVideosFromAPI.filter(v => v.durationSeconds > 180);
+
       setAllVideos(finalUniqueVideos);
 
     } catch (e) {
       console.error("Error aggregating videos:", e);
       const message = e instanceof Error ? e.message : "An unknown error occurred during video aggregation.";
       setError(message);
-      setAllVideos([]); // Clear videos on major aggregation error
+      setAllVideos([]);
     } finally {
       setIsLoading(false);
     }
@@ -187,20 +192,19 @@ export default function Home() {
 
     if (apiKey && channels.length > 0) {
         const videosFromCurrentChannelsInCache = allVideos.filter(v => currentChannelIds.has(v.channelId));
-        const allChannelsRepresentedInCache = channels.every(c => videosFromCurrentChannelsInCache.some(v => v.channelId === c.youtubeChannelId));
+        const allCurrentlySelectedChannelsRepresentedInCache = channels.every(c => 
+            videosFromCurrentChannelsInCache.some(v => v.channelId === c.youtubeChannelId)
+        );
 
-        if (!allChannelsRepresentedInCache && allVideos.length > 0) { // Some channels in list are not in cache
-           aggregateAndSortVideos(false); // Fetch for all, allow cache for existing, then merge
-        } else if (allVideos.length === 0){ // No videos in cache at all
+        if (!allCurrentlySelectedChannelsRepresentedInCache && allVideos.length > 0) { 
            aggregateAndSortVideos(false); 
-        } else { // All videos in cache, all channels represented, just refresh ratings and filter
+        } else if (allVideos.length === 0){ 
+           aggregateAndSortVideos(false); 
+        } else { 
             const refreshedAndFiltered = allVideos
               .filter(v => currentChannelIds.has(v.channelId)) 
-              .filter(v => v.durationSeconds > 180) // Filter out videos <= 3 minutes
-              .map(v => { 
-                  // Rating is now just views
-                  return {...v, rating: v.views };
-              });
+              .filter(v => v.durationSeconds > 180)
+              .map(v => ({ ...v, rating: v.views }));
             setAllVideos(refreshedAndFiltered);
         }
     } else if (!apiKey && channels.length > 0) {
@@ -211,7 +215,7 @@ export default function Home() {
         setError(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channels, apiKey, isClientMounted]); // Removed aggregateAndSortVideos from deps to avoid loops, setAllVideos handles cache consistency
+  }, [channels, apiKey, isClientMounted]);
 
   const handleRefreshVideos = () => {
     if (!apiKey) {
@@ -225,14 +229,53 @@ export default function Home() {
   const memoizedFilteredVideos = useMemo(() => {
     if (!isClientMounted) return []; 
 
-    let filtered = allVideos.filter(video => !isVideoWatched(video.id));
-
+    // 1. Initial filters (watched, mobile hidden)
+    let videosToProcess = allVideos.filter(video => !isVideoWatched(video.id));
     if (isMobile) {
-      filtered = filtered.filter(video => !isVideoHiddenOnMobile(video.id));
+      videosToProcess = videosToProcess.filter(video => !isVideoHiddenOnMobile(video.id));
     }
 
+    // 2. Group by channel and sort each channel's videos by views (popularity)
+    const videosByChannel = new Map<string, Video[]>();
+    for (const video of videosToProcess) {
+      if (!videosByChannel.has(video.channelId)) {
+        videosByChannel.set(video.channelId, []);
+      }
+      // Ensure only videos from currently active channels are processed for interweaving
+      if (channels.some(ch => ch.youtubeChannelId === video.channelId)) {
+          videosByChannel.get(video.channelId)!.push(video);
+      }
+    }
+
+    videosByChannel.forEach(channelVideos => {
+      channelVideos.sort((a, b) => b.views - a.views); // Sort by views descending (rating is views)
+    });
+    
+    // 3. Interweave videos (round-robin based on current channel order)
+    const interwovenVideos: Video[] = [];
+    let videoIndex = 0;
+    let moreVideosToProcessFromAnyChannel = true;
+    // Use the order of channels as defined in the `channels` state (user-managed order)
+    const activeChannelIdsInOrder = channels.map(c => c.youtubeChannelId);
+
+    while (moreVideosToProcessFromAnyChannel) {
+      moreVideosToProcessFromAnyChannel = false; // Assume no more videos unless one is found
+      for (const channelId of activeChannelIdsInOrder) {
+        const channelVideoList = videosByChannel.get(channelId);
+        if (channelVideoList && videoIndex < channelVideoList.length) {
+          interwovenVideos.push(channelVideoList[videoIndex]);
+          moreVideosToProcessFromAnyChannel = true; // Found a video, so continue looping
+        }
+      }
+      if (moreVideosToProcessFromAnyChannel) {
+        videoIndex++; // Move to the next video rank for the next round
+      }
+    }
+    
+    // 4. Apply duration and watchLater filters to the interwoven list
+    let filteredAndInterwoven = interwovenVideos;
     if (durationFilter !== 'all') {
-      filtered = filtered.filter(video => {
+      filteredAndInterwoven = filteredAndInterwoven.filter(video => {
         const duration = video.durationSeconds;
         if (durationFilter === 'short') return duration < 600; 
         if (durationFilter === 'medium') return duration >= 600 && duration <= 1800; 
@@ -242,13 +285,14 @@ export default function Home() {
     }
 
     if (watchLaterFilter === 'watchLaterOnly') {
-        filtered = filtered.filter(video => isVideoWatchLater(video.id));
+        filteredAndInterwoven = filteredAndInterwoven.filter(video => isVideoWatchLater(video.id));
     } else if (watchLaterFilter === 'notWatchLater') {
-        filtered = filtered.filter(video => !isVideoWatchLater(video.id));
+        filteredAndInterwoven = filteredAndInterwoven.filter(video => !isVideoWatchLater(video.id));
     }
 
-
-    return [...filtered].sort((a, b) => {
+    // 5. Sort the final list based on user's sortOption
+    // The `rating` property is already just `views`.
+    return [...filteredAndInterwoven].sort((a, b) => {
       const valA = a[sortOption.property];
       const valB = b[sortOption.property];
 
@@ -263,7 +307,7 @@ export default function Home() {
       
       return sortOption.direction === 'asc' ? comparison : -comparison;
     });
-  }, [allVideos, isVideoWatched, isMobile, isVideoHiddenOnMobile, durationFilter, watchLaterFilter, sortOption, isVideoWatchLater, isClientMounted]);
+  }, [allVideos, isVideoWatched, isMobile, isVideoHiddenOnMobile, durationFilter, watchLaterFilter, sortOption, isVideoWatchLater, isClientMounted, channels]);
 
   const stats = useMemo(() => {
     if (!isClientMounted) return { totalUnwatched: 0, averageRating: "0.00" };
@@ -345,3 +389,4 @@ export default function Home() {
     
 
     
+
