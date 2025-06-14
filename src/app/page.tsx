@@ -85,11 +85,9 @@ export default function Home() {
           return null;
         }
 
-        const publishedDate = new Date(details.snippet.publishedAt);
-        const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDate.getTime()) / (1000 * 60 * 60));
         const views = parseInt(details.statistics.viewCount, 10) || 0;
-        
-        const rating = views / (Math.pow(hoursSincePosting + 10, 0.8));
+        // Rating is now just the number of views
+        const rating = views;
         
         return {
           id: details.id,
@@ -100,7 +98,7 @@ export default function Home() {
           views: views,
           channelName: details.snippet.channelTitle,
           channelId: details.snippet.channelId,
-          rating: rating || 0,
+          rating: rating,
           durationSeconds: durationSeconds,
         };
       })
@@ -135,10 +133,8 @@ export default function Home() {
       const refreshedAndFiltered = videosFromCurrentChannels
         .filter(v => v.durationSeconds > 180) // Filter out videos <= 3 minutes
         .map(v => { 
-            const publishedDate = new Date(v.publishedDate);
-            const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDate.getTime()) / (1000 * 60 * 60));
-            const rating = v.views / (Math.pow(hoursSincePosting + 10, 0.8));
-            return {...v, rating: rating || 0 };
+            // Rating is now just views, no need to recalculate based on time
+            return {...v, rating: v.views };
         });
       setAllVideos(refreshedAndFiltered);
       setIsLoading(false);
@@ -202,10 +198,8 @@ export default function Home() {
               .filter(v => currentChannelIds.has(v.channelId)) 
               .filter(v => v.durationSeconds > 180) // Filter out videos <= 3 minutes
               .map(v => { 
-                  const publishedDate = new Date(v.publishedDate);
-                  const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDate.getTime()) / (1000 * 60 * 60));
-                  const rating = v.views / (Math.pow(hoursSincePosting + 10, 0.8));
-                  return {...v, rating: rating || 0 };
+                  // Rating is now just views
+                  return {...v, rating: v.views };
               });
             setAllVideos(refreshedAndFiltered);
         }
