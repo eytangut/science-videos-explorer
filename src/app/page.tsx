@@ -80,18 +80,18 @@ export default function Home() {
         const playlistItem = playlistItems.find(pi => pi.contentDetails.videoId === details.id);
         if (!playlistItem) return null;
 
-        const publishedDate = new Date(details.snippet.publishedAt);
-        const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDate.getTime()) / (1000 * 60 * 60));
-        const views = parseInt(details.statistics.viewCount, 10) || 0;
-        
-        const rating = views / (Math.pow(hoursSincePosting + 5, 0.7));
-        
         const durationSeconds = parseISO8601Duration(details.contentDetails.duration);
-
         if (durationSeconds <= 60) { // Filter out shorts (<= 60 seconds)
           return null;
         }
 
+        const publishedDate = new Date(details.snippet.publishedAt);
+        const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDate.getTime()) / (1000 * 60 * 60));
+        const views = parseInt(details.statistics.viewCount, 10) || 0;
+        
+        // New rating formula
+        const rating = views / (Math.pow(hoursSincePosting + 10, 0.8));
+        
         return {
           id: details.id,
           title: details.snippet.title,
@@ -133,14 +133,16 @@ export default function Home() {
       const currentChannelIds = new Set(channels.map(c => c.youtubeChannelId));
       const videosFromCurrentChannels = allVideos.filter(v => currentChannelIds.has(v.channelId));
 
-      const refreshedAndSorted = videosFromCurrentChannels
+      const refreshedAndFiltered = videosFromCurrentChannels
+        .filter(v => v.durationSeconds > 60) // Ensure Shorts are filtered from cache
         .map(v => { 
             const publishedDate = new Date(v.publishedDate);
             const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDate.getTime()) / (1000 * 60 * 60));
-            const rating = v.views / (Math.pow(hoursSincePosting + 5, 0.7));
+            // New rating formula
+            const rating = v.views / (Math.pow(hoursSincePosting + 10, 0.8));
             return {...v, rating: rating || 0 };
         });
-      setAllVideos(refreshedAndSorted); // Ratings updated, but not sorted by new sortOption yet. Sorting handled by memoizedFilteredVideos.
+      setAllVideos(refreshedAndFiltered);
       setIsLoading(false);
       return;
     }
@@ -169,7 +171,7 @@ export default function Home() {
       }
 
       const uniqueVideos = Array.from(new Map(fetchedVideos.map(video => [video.id, video])).values());
-      setAllVideos(uniqueVideos); // Sorting handled by memoizedFilteredVideos
+      setAllVideos(uniqueVideos);
 
     } catch (e) {
       console.error("Error aggregating videos:", e);
@@ -183,30 +185,29 @@ export default function Home() {
 
 
   useEffect(() => {
-    if (!isClientMounted) return; // Don't run initial fetch logic until client is mounted
+    if (!isClientMounted) return;
 
     if (apiKey && channels.length > 0) {
-        // Check if all current channels have some videos in the cache
         const currentChannelIds = new Set(channels.map(c => c.youtubeChannelId));
         const videosFromCurrentChannelsInCache = allVideos.filter(v => currentChannelIds.has(v.channelId));
         const allChannelsRepresentedInCache = channels.every(c => videosFromCurrentChannelsInCache.some(v => v.channelId === c.youtubeChannelId));
 
         if (!allChannelsRepresentedInCache && allVideos.length > 0) {
-          // Some channels might be new, or cache is stale regarding channel list
-           aggregateAndSortVideos(false); // Fetch if necessary, but prefer cache if possible for existing channels
+           aggregateAndSortVideos(false); 
         } else if (allVideos.length === 0){
-           aggregateAndSortVideos(false); // No videos at all, fetch
+           aggregateAndSortVideos(false); 
         } else {
-            // Existing data seems fine for current channels, just update ratings
-            const refreshedAndSorted = allVideos
-              .filter(v => currentChannelIds.has(v.channelId)) // ensure we only process videos from current channels
+            const refreshedAndFiltered = allVideos
+              .filter(v => currentChannelIds.has(v.channelId)) 
+              .filter(v => v.durationSeconds > 60) // Ensure Shorts are filtered from cache
               .map(v => { 
                   const publishedDate = new Date(v.publishedDate);
                   const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDate.getTime()) / (1000 * 60 * 60));
-                  const rating = v.views / (Math.pow(hoursSincePosting + 5, 0.7));
+                  // New rating formula
+                  const rating = v.views / (Math.pow(hoursSincePosting + 10, 0.8));
                   return {...v, rating: rating || 0 };
               });
-            setAllVideos(refreshedAndSorted);
+            setAllVideos(refreshedAndFiltered);
         }
     } else if (!apiKey && channels.length > 0) {
         setError("YouTube API Key is not set. Please add it in the Channel Setup panel to fetch videos.");
@@ -216,7 +217,7 @@ export default function Home() {
         setError(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channels, apiKey, isClientMounted]); // Not aggregateAndSortVideos, to avoid loops. Effect also depends on isClientMounted now.
+  }, [channels, apiKey, isClientMounted]); 
 
   const handleRefreshVideos = () => {
     if (!apiKey) {
@@ -228,7 +229,7 @@ export default function Home() {
   }
 
   const memoizedFilteredVideos = useMemo(() => {
-    if (!isClientMounted) return []; // Don't process videos until client is mounted and localStorage is synced
+    if (!isClientMounted) return []; 
 
     let filtered = allVideos.filter(video => !isVideoWatched(video.id));
 
@@ -236,18 +237,16 @@ export default function Home() {
       filtered = filtered.filter(video => !isVideoHiddenOnMobile(video.id));
     }
 
-    // Duration Filter
     if (durationFilter !== 'all') {
       filtered = filtered.filter(video => {
         const duration = video.durationSeconds;
-        if (durationFilter === 'short') return duration < 600; // < 10 min
-        if (durationFilter === 'medium') return duration >= 600 && duration <= 1800; // 10-30 min
-        if (durationFilter === 'long') return duration > 1800; // > 30 min
+        if (durationFilter === 'short') return duration < 600; 
+        if (durationFilter === 'medium') return duration >= 600 && duration <= 1800; 
+        if (durationFilter === 'long') return duration > 1800; 
         return true;
       });
     }
 
-    // Watch Later Filter
     if (watchLaterFilter === 'watchLaterOnly') {
         filtered = filtered.filter(video => isVideoWatchLater(video.id));
     } else if (watchLaterFilter === 'notWatchLater') {
@@ -255,7 +254,6 @@ export default function Home() {
     }
 
 
-    // Sorting
     return [...filtered].sort((a, b) => {
       const valA = a[sortOption.property];
       const valB = b[sortOption.property];
@@ -346,5 +344,7 @@ export default function Home() {
     </div>
   );
 }
+
+    
 
     
