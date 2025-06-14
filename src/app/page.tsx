@@ -272,8 +272,21 @@ export default function Home() {
       }
     }
 
+    // Sort videos within each channel based on the global sortOption
     videosByChannel.forEach(channelVideos => {
-      channelVideos.sort((a, b) => b.rating - a.rating); 
+      channelVideos.sort((a, b) => {
+        const valA = a[sortOption.property];
+        const valB = b[sortOption.property];
+        let comparison = 0;
+        if (typeof valA === 'number' && typeof valB === 'number') {
+          comparison = valA - valB;
+        } else if (typeof valA === 'string' && typeof valB === 'string') {
+          comparison = valA.localeCompare(valB);
+        } else if (sortOption.property === 'publishedDate') {
+          comparison = new Date(valA as string).getTime() - new Date(valB as string).getTime();
+        }
+        return sortOption.direction === 'asc' ? comparison : -comparison;
+      });
     });
     
     let interwovenVideosUnshuffled: Video[] = [];
@@ -314,21 +327,9 @@ export default function Home() {
         filteredAndInterwoven = filteredAndInterwoven.filter(video => !isVideoWatchLater(video.id));
     }
 
-    return [...filteredAndInterwoven].sort((a, b) => {
-      const valA = a[sortOption.property];
-      const valB = b[sortOption.property];
+    // Removed the final global sort to preserve interleaved order
+    return filteredAndInterwoven;
 
-      let comparison = 0;
-      if (typeof valA === 'number' && typeof valB === 'number') {
-        comparison = valA - valB;
-      } else if (typeof valA === 'string' && typeof valB === 'string') {
-        comparison = valA.localeCompare(valB);
-      } else if (sortOption.property === 'publishedDate') {
-        comparison = new Date(valA as string).getTime() - new Date(valB as string).getTime();
-      }
-      
-      return sortOption.direction === 'asc' ? comparison : -comparison;
-    });
   }, [allVideos, isVideoWatched, isMobile, isVideoHiddenOnMobile, channels, durationFilter, watchLaterFilter, sortOption, isVideoWatchLater, isClientMounted]);
 
   const stats = useMemo(() => {
@@ -412,6 +413,7 @@ export default function Home() {
     
 
     
+
 
 
 
