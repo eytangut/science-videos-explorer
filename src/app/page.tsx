@@ -25,6 +25,15 @@ type SortOption = {
 type DurationFilter = 'all' | 'short' | 'medium' | 'long'; // short <10m, medium 10-30m, long >30m
 type WatchLaterFilter = 'all' | 'watchLaterOnly' | 'notWatchLater';
 
+// Fisher-Yates (Knuth) Shuffle
+function shuffleArray<T>(array: T[]): T[] {
+  const newArray = [...array]; // Create a copy to avoid mutating the original
+  for (let i = newArray.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+  }
+  return newArray;
+}
 
 export default function Home() {
   const { channels, addChannel, removeChannel, reorderChannels } = useChannels();
@@ -124,7 +133,6 @@ export default function Home() {
 
     const currentChannelIds = new Set(channels.map(c => c.youtubeChannelId));
     
-    // Check if cache can be used for ALL currently selected channels
     const allChannelsHaveSomeCachedVideos = channels.every(channel => 
       allVideos.some(video => video.channelId === channel.youtubeChannelId)
     );
@@ -134,17 +142,15 @@ export default function Home() {
 
 
     if (canUseExistingData) {
-      // Use cache, but ensure it's filtered and ratings are up-to-date for current channels
       const videosFromCurrentChannels = allVideos.filter(v => currentChannelIds.has(v.channelId));
       const refreshedAndFiltered = videosFromCurrentChannels
-        .filter(v => v.durationSeconds > 180) // Ensure shorts are filtered
-        .map(v => ({ ...v, rating: v.views })); // Ensure rating is just views
+        .filter(v => v.durationSeconds > 180) 
+        .map(v => ({ ...v, rating: v.views })); 
       setAllVideos(refreshedAndFiltered);
       setIsLoading(false);
       return;
     }
 
-    // Fetch from API
     try {
       const videoPromises = channels.map(channel => fetchVideosForChannel(channel, currentApiKey));
       const results = await Promise.allSettled(videoPromises);
@@ -168,7 +174,6 @@ export default function Home() {
         toast({ title: "No Videos Found", description: "The selected channels might not have any videos longer than 3 minutes, or feeds are empty." });
       }
       
-      // Filter out any shorts missed by fetchVideosForChannel (safeguard) and ensure unique
       const uniqueVideosFromAPI = Array.from(new Map(fetchedVideosFromAPI.map(video => [video.id, video])).values());
       const finalUniqueVideos = uniqueVideosFromAPI.filter(v => v.durationSeconds > 180);
 
@@ -226,53 +231,62 @@ export default function Home() {
     aggregateAndSortVideos(true);
   }
 
+  const handleClearCache = () => {
+    setAllVideos([]); // This also clears localStorage due to useLocalStorage hook
+    toast({ title: "Video Cache Cleared", description: "Local video cache has been emptied." });
+    if (apiKey && channels.length > 0) {
+      aggregateAndSortVideos(true); // Re-fetch videos
+    } else if (!apiKey) {
+      setError("API Key is not set. Please add it to fetch videos.");
+    } else {
+      setError(null); // No channels to fetch for
+    }
+  };
+
+
   const memoizedFilteredVideos = useMemo(() => {
     if (!isClientMounted) return []; 
 
-    // 1. Initial filters (watched, mobile hidden)
     let videosToProcess = allVideos.filter(video => !isVideoWatched(video.id));
     if (isMobile) {
       videosToProcess = videosToProcess.filter(video => !isVideoHiddenOnMobile(video.id));
     }
 
-    // 2. Group by channel and sort each channel's videos by views (popularity)
     const videosByChannel = new Map<string, Video[]>();
     for (const video of videosToProcess) {
       if (!videosByChannel.has(video.channelId)) {
         videosByChannel.set(video.channelId, []);
       }
-      // Ensure only videos from currently active channels are processed for interweaving
       if (channels.some(ch => ch.youtubeChannelId === video.channelId)) {
           videosByChannel.get(video.channelId)!.push(video);
       }
     }
 
     videosByChannel.forEach(channelVideos => {
-      channelVideos.sort((a, b) => b.views - a.views); // Sort by views descending (rating is views)
+      channelVideos.sort((a, b) => b.views - a.views); 
     });
     
-    // 3. Interweave videos (round-robin based on current channel order)
-    const interwovenVideos: Video[] = [];
+    let interwovenVideosUnshuffled: Video[] = [];
     let videoIndex = 0;
     let moreVideosToProcessFromAnyChannel = true;
-    // Use the order of channels as defined in the `channels` state (user-managed order)
     const activeChannelIdsInOrder = channels.map(c => c.youtubeChannelId);
 
     while (moreVideosToProcessFromAnyChannel) {
-      moreVideosToProcessFromAnyChannel = false; // Assume no more videos unless one is found
+      moreVideosToProcessFromAnyChannel = false; 
       for (const channelId of activeChannelIdsInOrder) {
         const channelVideoList = videosByChannel.get(channelId);
         if (channelVideoList && videoIndex < channelVideoList.length) {
-          interwovenVideos.push(channelVideoList[videoIndex]);
-          moreVideosToProcessFromAnyChannel = true; // Found a video, so continue looping
+          interwovenVideosUnshuffled.push(channelVideoList[videoIndex]);
+          moreVideosToProcessFromAnyChannel = true; 
         }
       }
       if (moreVideosToProcessFromAnyChannel) {
-        videoIndex++; // Move to the next video rank for the next round
+        videoIndex++; 
       }
     }
     
-    // 4. Apply duration and watchLater filters to the interwoven list
+    const interwovenVideos = shuffleArray(interwovenVideosUnshuffled);
+
     let filteredAndInterwoven = interwovenVideos;
     if (durationFilter !== 'all') {
       filteredAndInterwoven = filteredAndInterwoven.filter(video => {
@@ -290,8 +304,6 @@ export default function Home() {
         filteredAndInterwoven = filteredAndInterwoven.filter(video => !isVideoWatchLater(video.id));
     }
 
-    // 5. Sort the final list based on user's sortOption
-    // The `rating` property is already just `views`.
     return [...filteredAndInterwoven].sort((a, b) => {
       const valA = a[sortOption.property];
       const valB = b[sortOption.property];
@@ -339,6 +351,7 @@ export default function Home() {
           onRemoveChannel={removeChannel}
           onReorderChannels={reorderChannels}
           onRefreshVideos={handleRefreshVideos}
+          onClearCache={handleClearCache}
           apiKey={apiKey}
           onSetApiKey={handleSetApiKey}
           isLoadingVideos={isLoading}
@@ -389,4 +402,5 @@ export default function Home() {
     
 
     
+
 

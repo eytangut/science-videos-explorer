@@ -2,14 +2,14 @@
 "use client";
 
 import type { ChangeEvent, FormEvent } from 'react';
-import { useState } from 'react';
+import { useState, useEffect as useReactEffect } from 'react'; // Renamed to avoid conflict with page.tsx useEffect
 import type { Channel } from '@/types';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { toast } from '@/hooks/use-toast';
 import { fetchChannelDetails } from '@/lib/youtubeDataApi';
-import { PlusCircle, KeyRound, Settings, ListRestart } from 'lucide-react';
+import { PlusCircle, KeyRound, Settings, ListRestart, Trash2 } from 'lucide-react';
 import ManageChannelsDialog from './ManageChannelsDialog'; 
 
 interface ChannelManagementPanelProps {
@@ -18,6 +18,7 @@ interface ChannelManagementPanelProps {
   onRemoveChannel: (channelId: string) => void;
   onReorderChannels: (sourceIndex: number, destinationIndex: number) => void;
   onRefreshVideos: () => void;
+  onClearCache: () => void;
   apiKey: string;
   onSetApiKey: (key: string) => void;
   isLoadingVideos: boolean;
@@ -30,6 +31,7 @@ export default function ChannelManagementPanel({
   onRemoveChannel,
   onReorderChannels,
   onRefreshVideos,
+  onClearCache,
   apiKey,
   onSetApiKey,
   isLoadingVideos,
@@ -40,8 +42,7 @@ export default function ChannelManagementPanel({
   const [apiKeyInputValue, setApiKeyInputValue] = useState(apiKey);
   const [isManageDialogOpen, setIsManageDialogOpen] = useState(false);
 
-  // Update apiKeyInputValue if the prop apiKey changes (e.g. loaded from localStorage)
-  useState(() => {
+  useReactEffect(() => {
     setApiKeyInputValue(apiKey);
   }, [apiKey]);
 
@@ -107,6 +108,7 @@ export default function ChannelManagementPanel({
             variant="ghost" 
             size="icon" 
             aria-label="Refresh Videos" 
+            title="Refresh Videos from API"
             disabled={!isClientMounted || isLoadingVideos || !apiKey || channels.length === 0}
           >
             <ListRestart className="h-5 w-5 text-primary" />
@@ -126,7 +128,7 @@ export default function ChannelManagementPanel({
               aria-label="YouTube API Key"
               disabled={!isClientMounted}
             />
-            <Button onClick={handleSetApiKey} aria-label="Save API Key" disabled={!isClientMounted}>
+            <Button onClick={handleSetApiKey} aria-label="Save API Key" disabled={!isClientMounted || !apiKeyInputValue.trim()}>
               <KeyRound className="mr-2 h-5 w-5" /> Save Key
             </Button>
           </div>
@@ -148,21 +150,32 @@ export default function ChannelManagementPanel({
               disabled={!isClientMounted || isAdding || !apiKey}
               aria-label="New Channel ID"
             />
-            <Button type="submit" disabled={!isClientMounted || isAdding || !apiKey} aria-label="Add Channel">
+            <Button type="submit" disabled={!isClientMounted || isAdding || !apiKey || !newChannelId.trim()} aria-label="Add Channel">
               <PlusCircle className="mr-2 h-5 w-5" /> {isAdding ? 'Adding...' : 'Add'}
             </Button>
           </div>
           {isClientMounted && !apiKey && <p className="text-xs text-destructive">API Key is required to add channels.</p>}
         </form>
         
-        <ManageChannelsDialog
-            channels={channels}
-            onRemoveChannel={onRemoveChannel}
-            onReorderChannels={onReorderChannels}
-            open={isManageDialogOpen}
-            onOpenChange={setIsManageDialogOpen}
-            isClientMounted={isClientMounted}
-        />
+        <div className="space-y-2">
+            <ManageChannelsDialog
+                channels={channels}
+                onRemoveChannel={onRemoveChannel}
+                onReorderChannels={onReorderChannels}
+                open={isManageDialogOpen}
+                onOpenChange={setIsManageDialogOpen}
+                isClientMounted={isClientMounted}
+            />
+            <Button 
+                variant="outline" 
+                onClick={onClearCache}
+                disabled={!isClientMounted || isLoadingVideos}
+                className="w-full"
+                aria-label="Clear Video Cache"
+            >
+                <Trash2 className="mr-2 h-5 w-5" /> Clear Video Cache
+            </Button>
+        </div>
 
       </CardContent>
     </Card>
