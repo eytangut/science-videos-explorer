@@ -95,7 +95,9 @@ export default function Home() {
         }
 
         const views = parseInt(details.statistics.viewCount, 10) || 0;
-        const rating = views; // Rating is now just views
+        const publishedDateTime = new Date(details.snippet.publishedAt).getTime();
+        const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDateTime) / (1000 * 60 * 60)); // Ensure hoursSincePosting is at least a small positive number
+        const rating = views / Math.pow(hoursSincePosting + 10, 0.8);
         
         return {
           id: details.id,
@@ -145,7 +147,11 @@ export default function Home() {
       const videosFromCurrentChannels = allVideos.filter(v => currentChannelIds.has(v.channelId));
       const refreshedAndFiltered = videosFromCurrentChannels
         .filter(v => v.durationSeconds > 180) 
-        .map(v => ({ ...v, rating: v.views })); 
+        .map(v => {
+          const publishedDateTime = new Date(v.publishedDate).getTime();
+          const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDateTime) / (1000 * 60 * 60));
+          return { ...v, rating: v.views / Math.pow(hoursSincePosting + 10, 0.8) };
+        }); 
       setAllVideos(refreshedAndFiltered);
       setIsLoading(false);
       return;
@@ -175,7 +181,7 @@ export default function Home() {
       }
       
       const uniqueVideosFromAPI = Array.from(new Map(fetchedVideosFromAPI.map(video => [video.id, video])).values());
-      const finalUniqueVideos = uniqueVideosFromAPI.filter(v => v.durationSeconds > 180);
+      const finalUniqueVideos = uniqueVideosFromAPI.filter(v => v.durationSeconds > 180); // Ensure filter is applied here too
 
       setAllVideos(finalUniqueVideos);
 
@@ -209,7 +215,11 @@ export default function Home() {
             const refreshedAndFiltered = allVideos
               .filter(v => currentChannelIds.has(v.channelId)) 
               .filter(v => v.durationSeconds > 180)
-              .map(v => ({ ...v, rating: v.views }));
+              .map(v => {
+                const publishedDateTime = new Date(v.publishedDate).getTime();
+                const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDateTime) / (1000 * 60 * 60));
+                return { ...v, rating: v.views / Math.pow(hoursSincePosting + 10, 0.8) };
+              });
             setAllVideos(refreshedAndFiltered);
         }
     } else if (!apiKey && channels.length > 0) {
@@ -220,7 +230,7 @@ export default function Home() {
         setError(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channels, apiKey, isClientMounted]);
+  }, [channels, apiKey, isClientMounted]); // aggregateAndSortVideos is stable due to useCallback
 
   const handleRefreshVideos = () => {
     if (!apiKey) {
@@ -257,11 +267,13 @@ export default function Home() {
       if (!videosByChannel.has(video.channelId)) {
         videosByChannel.set(video.channelId, []);
       }
+      // Ensure video belongs to a currently selected channel before adding to map
       if (channels.some(ch => ch.youtubeChannelId === video.channelId)) {
           videosByChannel.get(video.channelId)!.push(video);
       }
     }
 
+    // Sort videos within each channel by views (most popular first)
     videosByChannel.forEach(channelVideos => {
       channelVideos.sort((a, b) => b.views - a.views); 
     });
@@ -269,41 +281,46 @@ export default function Home() {
     let interwovenVideosUnshuffled: Video[] = [];
     let videoIndex = 0;
     let moreVideosToProcessFromAnyChannel = true;
-    const activeChannelIdsInOrder = channels.map(c => c.youtubeChannelId);
+    const activeChannelIdsInOrder = channels.map(c => c.youtubeChannelId); // Respect user-defined channel order
 
+    // Interweave videos using round-robin, respecting channel order
     while (moreVideosToProcessFromAnyChannel) {
-      moreVideosToProcessFromAnyChannel = false; 
+      moreVideosToProcessFromAnyChannel = false; // Assume no more videos unless one is found
       for (const channelId of activeChannelIdsInOrder) {
         const channelVideoList = videosByChannel.get(channelId);
         if (channelVideoList && videoIndex < channelVideoList.length) {
           interwovenVideosUnshuffled.push(channelVideoList[videoIndex]);
-          moreVideosToProcessFromAnyChannel = true; 
+          moreVideosToProcessFromAnyChannel = true; // A video was added, so continue processing
         }
       }
       if (moreVideosToProcessFromAnyChannel) {
-        videoIndex++; 
+        videoIndex++; // Move to the next "rank" of videos
       }
     }
     
+    // Shuffle the interwoven list to add randomness
     const interwovenVideos = shuffleArray(interwovenVideosUnshuffled);
 
     let filteredAndInterwoven = interwovenVideos;
+    // Apply duration filter
     if (durationFilter !== 'all') {
       filteredAndInterwoven = filteredAndInterwoven.filter(video => {
         const duration = video.durationSeconds;
-        if (durationFilter === 'short') return duration < 600; 
-        if (durationFilter === 'medium') return duration >= 600 && duration <= 1800; 
-        if (durationFilter === 'long') return duration > 1800; 
+        if (durationFilter === 'short') return duration < 600; // < 10 min
+        if (durationFilter === 'medium') return duration >= 600 && duration <= 1800; // 10-30 min
+        if (durationFilter === 'long') return duration > 1800; // > 30 min
         return true;
       });
     }
 
+    // Apply watch later filter
     if (watchLaterFilter === 'watchLaterOnly') {
         filteredAndInterwoven = filteredAndInterwoven.filter(video => isVideoWatchLater(video.id));
     } else if (watchLaterFilter === 'notWatchLater') {
         filteredAndInterwoven = filteredAndInterwoven.filter(video => !isVideoWatchLater(video.id));
     }
 
+    // Apply final sort based on user selection
     return [...filteredAndInterwoven].sort((a, b) => {
       const valA = a[sortOption.property];
       const valB = b[sortOption.property];
@@ -314,12 +331,13 @@ export default function Home() {
       } else if (typeof valA === 'string' && typeof valB === 'string') {
         comparison = valA.localeCompare(valB);
       } else if (sortOption.property === 'publishedDate') {
+        // Ensure dates are compared correctly
         comparison = new Date(valA as string).getTime() - new Date(valB as string).getTime();
       }
       
       return sortOption.direction === 'asc' ? comparison : -comparison;
     });
-  }, [allVideos, isVideoWatched, isMobile, isVideoHiddenOnMobile, durationFilter, watchLaterFilter, sortOption, isVideoWatchLater, isClientMounted, channels]);
+  }, [allVideos, isVideoWatched, isMobile, isVideoHiddenOnMobile, channels, durationFilter, watchLaterFilter, sortOption, isVideoWatchLater, isClientMounted]);
 
   const stats = useMemo(() => {
     if (!isClientMounted) return { totalUnwatched: 0, averageRating: "0.00" };
@@ -402,5 +420,6 @@ export default function Home() {
     
 
     
+
 
 
