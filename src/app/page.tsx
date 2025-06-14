@@ -81,7 +81,7 @@ export default function Home() {
         if (!playlistItem) return null;
 
         const durationSeconds = parseISO8601Duration(details.contentDetails.duration);
-        if (durationSeconds <= 60) { // Filter out shorts (<= 60 seconds)
+        if (durationSeconds <= 180) { // Filter out videos <= 3 minutes
           return null;
         }
 
@@ -133,7 +133,7 @@ export default function Home() {
       const videosFromCurrentChannels = allVideos.filter(v => currentChannelIds.has(v.channelId));
 
       const refreshedAndFiltered = videosFromCurrentChannels
-        .filter(v => v.durationSeconds > 60) 
+        .filter(v => v.durationSeconds > 180) // Filter out videos <= 3 minutes
         .map(v => { 
             const publishedDate = new Date(v.publishedDate);
             const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDate.getTime()) / (1000 * 60 * 60));
@@ -165,12 +165,12 @@ export default function Home() {
       if (fetchedVideos.length === 0 && fetchErrorOccurred && channels.length > 0) {
         // setError is already populated
       } else if (fetchedVideos.length === 0 && channels.length > 0 && !fetchErrorOccurred) {
-        toast({ title: "No Videos Found", description: "The selected channels might not have any (non-Short) videos, or feeds are empty." });
+        toast({ title: "No Videos Found", description: "The selected channels might not have any videos longer than 3 minutes, or feeds are empty." });
       }
 
       const uniqueVideosFromAPI = Array.from(new Map(fetchedVideos.map(video => [video.id, video])).values());
-      // Safeguard filter: ensure Shorts are removed even if fetchVideosForChannel missed any (should be redundant)
-      const finalUniqueVideos = uniqueVideosFromAPI.filter(v => v.durationSeconds > 60);
+      // Safeguard filter: ensure videos <= 3 min are removed even if fetchVideosForChannel missed any
+      const finalUniqueVideos = uniqueVideosFromAPI.filter(v => v.durationSeconds > 180);
       setAllVideos(finalUniqueVideos);
 
     } catch (e) {
@@ -197,10 +197,10 @@ export default function Home() {
            aggregateAndSortVideos(false); // Fetch for all, allow cache for existing, then merge
         } else if (allVideos.length === 0){ // No videos in cache at all
            aggregateAndSortVideos(false); 
-        } else { // All videos in cache, all channels represented, just refresh ratings and filter shorts
+        } else { // All videos in cache, all channels represented, just refresh ratings and filter
             const refreshedAndFiltered = allVideos
               .filter(v => currentChannelIds.has(v.channelId)) 
-              .filter(v => v.durationSeconds > 60) 
+              .filter(v => v.durationSeconds > 180) // Filter out videos <= 3 minutes
               .map(v => { 
                   const publishedDate = new Date(v.publishedDate);
                   const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDate.getTime()) / (1000 * 60 * 60));
@@ -346,6 +346,8 @@ export default function Home() {
 }
     
     
+    
+
     
 
     
