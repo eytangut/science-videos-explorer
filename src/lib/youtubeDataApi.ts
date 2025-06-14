@@ -30,13 +30,9 @@ export async function fetchChannelDetails(apiKey: string, identifier: string): P
   const cleanedIdentifier = identifier.startsWith('@') ? identifier.substring(1) : identifier.trim();
   let apiUrl = '';
 
-  // Determine if the identifier looks like a channel ID (starts with UC) or should be treated as a username/handle
-  if (cleanedIdentifier.startsWith('UC') && cleanedIdentifier.length > 20) { // Heuristic for Channel ID
+  if (cleanedIdentifier.startsWith('UC') && cleanedIdentifier.length > 20) { 
     apiUrl = `${YOUTUBE_API_BASE_URL}/channels?part=snippet,contentDetails&id=${cleanedIdentifier}&key=${apiKey}`;
   } else {
-    // Assume it's a username/handle for the forUsername parameter
-    // Note: forUsername works with legacy usernames. Modern @handles might not always resolve this way.
-    // A more robust solution for @handles would use the Search API, but this is a common first attempt.
     apiUrl = `${YOUTUBE_API_BASE_URL}/channels?part=snippet,contentDetails&forUsername=${cleanedIdentifier}&key=${apiKey}`;
   }
 
@@ -53,46 +49,33 @@ export async function fetchChannelDetails(apiKey: string, identifier: string): P
     if (data.items && data.items.length > 0) {
       return data.items[0];
     } else {
-      // Response was OK, but no items found (e.g., username doesn't exist or ID is invalid)
       console.warn(`Channel not found for identifier: '${cleanedIdentifier}' using ${apiUrl.split('?')[0]}. API returned no items.`);
-      return null; // To be handled by the calling function (e.g., in ChannelManagementPanel)
+      return null; 
     }
   } catch (error) {
-    // This catches network errors or errors re-thrown from the !response.ok block.
     console.error(`Exception during fetchChannelDetails for identifier '${cleanedIdentifier}':`, error);
-    throw error; // Re-throw to be caught by handleAddChannel in the UI component
+    throw error; 
   }
 }
 
-
-export async function fetchChannelUploadsPlaylistId(apiKey: string, channelId: string): Promise<string | null> {
-  // This function assumes channelId is a valid UC... format ID,
-  // as it should be if obtained from a prior successful fetchChannelDetails call.
-  const channelDetails = await fetchChannelDetails(apiKey, channelId);
-  return channelDetails?.contentDetails?.relatedPlaylists?.uploads || null;
-}
-
-export async function fetchPlaylistVideos(
-  apiKey: string,
-  playlistId: string,
-  maxResults = 20 // Updated from 15 to 20
-): Promise<YouTubePlaylistItem[]> {
+export async function fetchChannelPopularVideoIdsFromSearch(apiKey: string, channelId: string, maxResults = 20): Promise<string[]> {
   try {
     const response = await fetch(
-      `${YOUTUBE_API_BASE_URL}/playlistItems?part=snippet,contentDetails&playlistId=${playlistId}&maxResults=${maxResults}&key=${apiKey}`
+      `${YOUTUBE_API_BASE_URL}/search?part=snippet&channelId=${channelId}&order=viewCount&type=video&maxResults=${maxResults}&key=${apiKey}`
     );
     if (!response.ok) {
-      const errorData = await response.json();
-      console.error('Error fetching playlist videos:', errorData);
-      throw new Error(errorData.error?.message ||`Failed to fetch playlist videos: ${response.statusText}`);
+      const errorData = await response.json().catch(() => ({error: {message: `API request failed with status ${response.status} and non-JSON response.`}}));
+      console.error('Error fetching popular videos from search:', errorData);
+      throw new Error(errorData.error?.message || `Failed to fetch popular videos: ${response.statusText}`);
     }
     const data = await response.json();
-    return data.items || [];
+    return data.items?.map((item: any) => item.id?.videoId).filter((id: string | undefined) => !!id) || [];
   } catch (error) {
-    console.error('Error in fetchPlaylistVideos:', error);
+    console.error('Error in fetchChannelPopularVideoIdsFromSearch:', error);
     throw error;
   }
 }
+
 
 export async function fetchVideosDetails(apiKey: string, videoIds: string[]): Promise<YouTubeVideoDetails[]> {
   if (videoIds.length === 0) return [];
@@ -109,6 +92,35 @@ export async function fetchVideosDetails(apiKey: string, videoIds: string[]): Pr
     return data.items || [];
   } catch (error) {
     console.error('Error in fetchVideosDetails:', error);
+    throw error;
+  }
+}
+
+// fetchChannelUploadsPlaylistId and fetchPlaylistVideos are no longer directly used by the main video aggregation logic
+// but are kept for potential future use or alternative fetching strategies.
+export async function fetchChannelUploadsPlaylistId(apiKey: string, channelId: string): Promise<string | null> {
+  const channelDetails = await fetchChannelDetails(apiKey, channelId);
+  return channelDetails?.contentDetails?.relatedPlaylists?.uploads || null;
+}
+
+export async function fetchPlaylistVideos(
+  apiKey: string,
+  playlistId: string,
+  maxResults = 20
+): Promise<YouTubePlaylistItem[]> {
+  try {
+    const response = await fetch(
+      `${YOUTUBE_API_BASE_URL}/playlistItems?part=snippet,contentDetails&playlistId=${playlistId}&maxResults=${maxResults}&key=${apiKey}`
+    );
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('Error fetching playlist videos:', errorData);
+      throw new Error(errorData.error?.message ||`Failed to fetch playlist videos: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data.items || [];
+  } catch (error) {
+    console.error('Error in fetchPlaylistVideos:', error);
     throw error;
   }
 }

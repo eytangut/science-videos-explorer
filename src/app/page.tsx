@@ -12,7 +12,7 @@ import ChannelManagementPanel from '@/components/ChannelManagementPanel';
 import VideoList from '@/components/VideoList';
 import { toast } from '@/hooks/use-toast';
 import { Separator } from '@/components/ui/separator';
-import { fetchChannelUploadsPlaylistId, fetchPlaylistVideos, fetchVideosDetails, parseISO8601Duration } from '@/lib/youtubeDataApi';
+import { fetchChannelPopularVideoIdsFromSearch, fetchVideosDetails, parseISO8601Duration } from '@/lib/youtubeDataApi';
 import useLocalStorage from '@/hooks/useLocalStorage';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Info } from 'lucide-react';
@@ -59,11 +59,13 @@ export default function Home() {
 
   const handleSetApiKey = (newApiKey: string) => {
     setApiKey(newApiKey);
+    // Only fetch if cache is empty; otherwise, wait for explicit refresh.
     if (newApiKey && channels.length > 0 && allVideos.length === 0) {
       aggregateAndSortVideos(false, newApiKey);
     } else if (!newApiKey) {
-      setAllVideos([]); 
-      setError("API Key removed. Please set your YouTube API Key to fetch videos.");
+      // Optionally clear videos if API key is removed, or let them persist from cache
+      // setAllVideos([]); 
+      setError("API Key removed. Videos are shown from cache. Set API Key to fetch new videos.");
     }
   };
 
@@ -72,28 +74,15 @@ export default function Home() {
       throw new Error("API Key is not set. Please configure it in the Channel Setup panel.");
     }
 
-    const uploadsPlaylistId = await fetchChannelUploadsPlaylistId(currentApiKey, channel.youtubeChannelId);
-    if (!uploadsPlaylistId) {
-      throw new Error(`Could not find uploads playlist for channel: ${channel.name}`);
-    }
-
-    const playlistItems = await fetchPlaylistVideos(currentApiKey, uploadsPlaylistId, 20);
+    const videoIds = await fetchChannelPopularVideoIdsFromSearch(currentApiKey, channel.youtubeChannelId, 20);
     
-    const videoIds = playlistItems.map(item => item.contentDetails.videoId).filter(id => !!id);
     if (videoIds.length === 0) return [];
 
     const videoDetailsList = await fetchVideosDetails(currentApiKey, videoIds);
 
     return videoDetailsList
       .map(details => {
-        const playlistItem = playlistItems.find(pi => pi.contentDetails.videoId === details.id);
-        if (!playlistItem) return null;
-
         const durationSeconds = parseISO8601Duration(details.contentDetails.duration);
-        if (durationSeconds <= 180) { 
-          return null;
-        }
-
         const views = parseInt(details.statistics.viewCount, 10) || 0;
         // Rating is now just views
         const rating = views; 
@@ -122,7 +111,7 @@ export default function Home() {
       return;
     }
     if (channels.length === 0) {
-      setAllVideos([]);
+      setAllVideos([]); // Clear videos if no channels are selected
       setError(null);
       setIsLoading(false);
       return;
@@ -131,7 +120,7 @@ export default function Home() {
     setIsLoading(true);
     setError(null);
     
-    if (forceRefresh || allVideos.length === 0) { // Only fetch if forced or cache is empty
+    if (forceRefresh || allVideos.length === 0) { 
         try {
           const videoPromises = channels.map(channel => fetchVideosForChannel(channel, currentApiKey));
           const results = await Promise.allSettled(videoPromises);
@@ -152,10 +141,11 @@ export default function Home() {
           if (fetchedVideosFromAPI.length === 0 && fetchErrorOccurred && channels.length > 0) {
             // Error already set
           } else if (fetchedVideosFromAPI.length === 0 && channels.length > 0 && !fetchErrorOccurred) {
-            toast({ title: "No Videos Found", description: "The selected channels might not have any videos longer than 3 minutes, or feeds are empty." });
+            toast({ title: "No Videos Found", description: "The selected channels might not have any videos, or all videos are shorter than 3 minutes." });
           }
           
           const uniqueVideosFromAPI = Array.from(new Map(fetchedVideosFromAPI.map(video => [video.id, video])).values());
+          // Explicit filter for duration before caching:
           const finalUniqueVideos = uniqueVideosFromAPI.filter(v => v.durationSeconds > 180); 
 
           setAllVideos(finalUniqueVideos);
@@ -164,24 +154,13 @@ export default function Home() {
           console.error("Error aggregating videos:", e);
           const message = e instanceof Error ? e.message : "An unknown error occurred during video aggregation.";
           setError(message);
-          setAllVideos([]);
+          setAllVideos([]); // Clear videos on major aggregation error
         } finally {
           setIsLoading(false);
         }
     } else {
-        // Using existing cache, no API call needed unless forced
-        // Process existing allVideos with current channel list (especially if channels changed)
-        const videosFromCacheForCurrentChannels = allVideos.filter(video => 
-            channels.some(ch => ch.youtubeChannelId === video.channelId) && video.durationSeconds > 180
-        );
-        // If no videos for current channels in cache, or if channels.length is 0 but allVideos wasn't cleared.
-        if (videosFromCacheForCurrentChannels.length === 0 && channels.length > 0) {
-             // This might indicate a need to fetch if user expects videos for newly added channels not in cache
-             // For now, we stick to explicit refresh for API calls if cache exists.
-             // Or, it's possible the cache simply has no videos for the *currently selected* channels.
-        }
-        // No need to setAllVideos here, as we are using the existing cache.
-        // The memoizedFilteredVideos will use the up-to-date `allVideos` and `channels`.
+        // Using existing cache because not forceRefresh and allVideos.length > 0
+        // No API call needed. The memoizedFilteredVideos will use the existing `allVideos`.
         setIsLoading(false);
     }
   }, [channels, fetchVideosForChannel, apiKey, setAllVideos, allVideos]);
@@ -190,46 +169,48 @@ export default function Home() {
   useEffect(() => {
     if (!isClientMounted) return;
 
-    // This useEffect now primarily handles initial load if cache is empty
-    // or messages if API key is missing / no channels.
-    // It does NOT automatically call aggregateAndSortVideos if cache exists.
+    // Initial load logic:
+    // Only fetch if cache is empty AND API key and channels are present.
+    // Otherwise, rely on cached data or user action (refresh/clear cache).
     if (apiKey && channels.length > 0) {
         if (allVideos.length === 0) { 
            // Cache is empty, and setup is ready for an initial fetch.
-           aggregateAndSortVideos(false); 
+           aggregateAndSortVideos(false); // false = don't force, but it will fetch as cache is empty
         }
         // If allVideos.length > 0, cache exists. User must explicitly refresh.
+        // No automatic fetch on component mount if cache has data.
     } else if (!apiKey && channels.length > 0) {
-        setError("YouTube API Key is not set. Please add it in the Channel Setup panel to fetch videos.");
-        setAllVideos([]); 
+        setError("YouTube API Key is not set. Please add it to fetch videos.");
+        // Do not clear allVideos here, let user see cached data if any.
     } else if (channels.length === 0) {
-        setAllVideos([]); 
+        setAllVideos([]); // Clear videos if no channels
         setError(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channels, apiKey, isClientMounted, setAllVideos]); // Removed aggregateAndSortVideos from deps to avoid re-running on its changes
+  }, [apiKey, channels.length, isClientMounted]); // Removed aggregateAndSortVideos, setAllVideos
+                                                // allVideos.length is implicitly handled by the conditions
 
   const handleRefreshVideos = () => {
     if (!apiKey) {
       toast({ title: "API Key Required", description: "Please set your YouTube API Key before refreshing.", variant: "destructive"});
       return;
     }
-    toast({ title: "Refreshing Videos...", description: "Fetching the latest videos from all channels." });
+    toast({ title: "Refreshing Videos...", description: "Fetching the latest popular videos from all channels." });
     aggregateAndSortVideos(true); // forceRefresh = true
   }
 
   const handleClearCache = () => {
     setAllVideos([]); 
     toast({ title: "Video Cache Cleared", description: "Local video cache has been emptied." });
+    // After clearing cache, if setup is valid, trigger a fresh fetch.
     if (apiKey && channels.length > 0) {
-      aggregateAndSortVideos(true); // Treat as a forced refresh to repopulate
+      aggregateAndSortVideos(false); // Effectively a fresh fetch as cache is now empty
     } else if (!apiKey && channels.length > 0) {
       setError("API Key is not set. Please add it to fetch videos.");
     } else {
       setError(null); 
     }
   };
-
 
   const memoizedFilteredVideos = useMemo(() => {
     if (!isClientMounted) return []; 
@@ -292,8 +273,8 @@ export default function Home() {
         interwovenAndShuffled.push(...shuffleArray(currentBatch)); 
       }
       
-      if (!moreVideosToProcessFromAnyChannel) { // Check if any channel had videos in this iteration
-          break; // Exit if no videos were added from any channel in this batch
+      if (!moreVideosToProcessFromAnyChannel) { 
+          break; 
       }
     }
     
@@ -315,7 +296,7 @@ export default function Home() {
         filteredAndProcessed = filteredAndProcessed.filter(video => !isVideoWatchLater(video.id));
     }
     
-    // The final global sort is intentionally removed to preserve the batched shuffle order
+    // No final global sort is applied here to preserve the batched shuffle order
     return filteredAndProcessed;
 
   }, [allVideos, isVideoWatched, isMobile, isVideoHiddenOnMobile, channels, durationFilter, watchLaterFilter, sortOption, isVideoWatchLater, isClientMounted]);
@@ -324,12 +305,13 @@ export default function Home() {
     if (!isClientMounted) return { totalUnwatched: 0, averageRating: "0.00" };
 
     const totalUnwatched = memoizedFilteredVideos.length;
-    const averageRating = totalUnwatched > 0 
-      ? memoizedFilteredVideos.reduce((sum, video) => sum + video.rating, 0) / totalUnwatched
+    // Rating is just views now, so averageRating is average views.
+    const averageViews = totalUnwatched > 0 
+      ? memoizedFilteredVideos.reduce((sum, video) => sum + video.views, 0) / totalUnwatched
       : 0;
     return {
       totalUnwatched,
-      averageRating: averageRating.toFixed(2)
+      averageRating: averageViews.toFixed(0) // Display as whole number for views
     };
   }, [memoizedFilteredVideos, isClientMounted]);
 
@@ -373,7 +355,7 @@ export default function Home() {
           videos={memoizedFilteredVideos}
           onMarkAsWatched={addWatchedVideo}
           watchedVideoIds={watchedVideoIds}
-          isLoading={isLoading && !!apiKey}
+          isLoading={isLoading && !!apiKey} // Show loading only if API key is present and loading
           error={error}
           hasChannels={channels.length > 0}
           apiKeyIsSet={!!apiKey}
@@ -394,19 +376,3 @@ export default function Home() {
     </div>
   );
 }
-    
-    
-    
-
-    
-
-    
-
-
-
-
-
-
-
-    
-
