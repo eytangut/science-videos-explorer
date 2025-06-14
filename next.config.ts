@@ -8,8 +8,10 @@ import type {NextConfig} from 'next';
 // set REPO_NAME to an empty string ''.
 const REPO_NAME = 'science-video-viewer'; // <<--!!! UPDATE THIS TO YOUR REPOSITORY NAME OR EMPTY STRING !!!
 
-const basePath = REPO_NAME ? `/${REPO_NAME}` : '';
-const assetPrefix = REPO_NAME ? `/${REPO_NAME}/` : '';
+const isProd = process.env.NODE_ENV === 'production';
+
+const basePath = isProd && REPO_NAME ? `/${REPO_NAME}` : undefined;
+const assetPrefix = isProd && REPO_NAME ? `/${REPO_NAME}/` : undefined;
 
 
 const nextConfig: NextConfig = {
