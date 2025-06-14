@@ -89,7 +89,6 @@ export default function Home() {
         const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDate.getTime()) / (1000 * 60 * 60));
         const views = parseInt(details.statistics.viewCount, 10) || 0;
         
-        // New rating formula
         const rating = views / (Math.pow(hoursSincePosting + 10, 0.8));
         
         return {
@@ -126,19 +125,18 @@ export default function Home() {
     setIsLoading(true);
     setError(null);
 
+    const currentChannelIds = new Set(channels.map(c => c.youtubeChannelId));
     const canUseExistingData = !forceRefresh && allVideos.length > 0 &&
-      channels.every(c => allVideos.some(v => v.channelId === c.youtubeChannelId));
+      channels.every(c => allVideos.some(v => currentChannelIds.has(v.channelId) && v.channelId === c.youtubeChannelId));
 
     if (canUseExistingData) {
-      const currentChannelIds = new Set(channels.map(c => c.youtubeChannelId));
       const videosFromCurrentChannels = allVideos.filter(v => currentChannelIds.has(v.channelId));
 
       const refreshedAndFiltered = videosFromCurrentChannels
-        .filter(v => v.durationSeconds > 60) // Ensure Shorts are filtered from cache
+        .filter(v => v.durationSeconds > 60) 
         .map(v => { 
             const publishedDate = new Date(v.publishedDate);
             const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDate.getTime()) / (1000 * 60 * 60));
-            // New rating formula
             const rating = v.views / (Math.pow(hoursSincePosting + 10, 0.8));
             return {...v, rating: rating || 0 };
         });
@@ -170,14 +168,16 @@ export default function Home() {
         toast({ title: "No Videos Found", description: "The selected channels might not have any (non-Short) videos, or feeds are empty." });
       }
 
-      const uniqueVideos = Array.from(new Map(fetchedVideos.map(video => [video.id, video])).values());
-      setAllVideos(uniqueVideos);
+      const uniqueVideosFromAPI = Array.from(new Map(fetchedVideos.map(video => [video.id, video])).values());
+      // Safeguard filter: ensure Shorts are removed even if fetchVideosForChannel missed any (should be redundant)
+      const finalUniqueVideos = uniqueVideosFromAPI.filter(v => v.durationSeconds > 60);
+      setAllVideos(finalUniqueVideos);
 
     } catch (e) {
       console.error("Error aggregating videos:", e);
       const message = e instanceof Error ? e.message : "An unknown error occurred during video aggregation.";
       setError(message);
-      setAllVideos([]);
+      setAllVideos([]); // Clear videos on major aggregation error
     } finally {
       setIsLoading(false);
     }
@@ -187,23 +187,23 @@ export default function Home() {
   useEffect(() => {
     if (!isClientMounted) return;
 
+    const currentChannelIds = new Set(channels.map(c => c.youtubeChannelId));
+
     if (apiKey && channels.length > 0) {
-        const currentChannelIds = new Set(channels.map(c => c.youtubeChannelId));
         const videosFromCurrentChannelsInCache = allVideos.filter(v => currentChannelIds.has(v.channelId));
         const allChannelsRepresentedInCache = channels.every(c => videosFromCurrentChannelsInCache.some(v => v.channelId === c.youtubeChannelId));
 
-        if (!allChannelsRepresentedInCache && allVideos.length > 0) {
+        if (!allChannelsRepresentedInCache && allVideos.length > 0) { // Some channels in list are not in cache
+           aggregateAndSortVideos(false); // Fetch for all, allow cache for existing, then merge
+        } else if (allVideos.length === 0){ // No videos in cache at all
            aggregateAndSortVideos(false); 
-        } else if (allVideos.length === 0){
-           aggregateAndSortVideos(false); 
-        } else {
+        } else { // All videos in cache, all channels represented, just refresh ratings and filter shorts
             const refreshedAndFiltered = allVideos
               .filter(v => currentChannelIds.has(v.channelId)) 
-              .filter(v => v.durationSeconds > 60) // Ensure Shorts are filtered from cache
+              .filter(v => v.durationSeconds > 60) 
               .map(v => { 
                   const publishedDate = new Date(v.publishedDate);
                   const hoursSincePosting = Math.max(0.1, (Date.now() - publishedDate.getTime()) / (1000 * 60 * 60));
-                  // New rating formula
                   const rating = v.views / (Math.pow(hoursSincePosting + 10, 0.8));
                   return {...v, rating: rating || 0 };
               });
@@ -217,7 +217,7 @@ export default function Home() {
         setError(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channels, apiKey, isClientMounted]); 
+  }, [channels, apiKey, isClientMounted]); // Removed aggregateAndSortVideos from deps to avoid loops, setAllVideos handles cache consistency
 
   const handleRefreshVideos = () => {
     if (!apiKey) {
@@ -344,7 +344,8 @@ export default function Home() {
     </div>
   );
 }
-
+    
+    
     
 
     
