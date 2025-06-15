@@ -61,9 +61,11 @@ export default function Home() {
   const handleSetApiKey = (newApiKey: string) => {
     setApiKey(newApiKey);
     if (newApiKey && channels.length > 0 && cachedVideos.length === 0) {
-      aggregateAndSortVideos(false, newApiKey);
-    } else if (!newApiKey) {
+      aggregateAndSortVideos(true, newApiKey);
+    } else if (!newApiKey && channels.length > 0) {
       setError("API Key removed. Videos are shown from cache. Set API Key to fetch new videos.");
+    } else if (newApiKey && channels.length === 0) {
+      setError(null); // Clear error if API key is set but no channels
     }
   };
 
@@ -79,8 +81,7 @@ export default function Home() {
       .map(details => {
         const durationSeconds = parseISO8601Duration(details.contentDetails.duration);
         const views = parseInt(details.statistics.viewCount, 10) || 0;
-        // Rating is now just views
-        const rating = views; 
+        const rating = views; // Rating is now just views
         
         return {
           id: details.id,
@@ -142,7 +143,7 @@ export default function Home() {
           const uniqueVideosFromAPI = Array.from(new Map(fetchedVideosFromAPI.map(video => [video.id, video])).values());
           const finalUniqueVideos = uniqueVideosFromAPI.filter(v => v.durationSeconds > 180); 
 
-          setCachedVideos(finalUniqueVideos); // This will trigger the useEffect for setBaseShuffledVideos
+          setCachedVideos(finalUniqueVideos);
 
         } catch (e) {
           console.error("Error aggregating videos:", e);
@@ -153,16 +154,18 @@ export default function Home() {
           setIsLoading(false);
         }
     } else {
-        setIsLoading(false);
+      // If not forcing refresh and cache exists, we don't re-fetch.
+      // The existing cachedVideos will be used by the useEffect that sets baseShuffledVideos.
+      setIsLoading(false);
     }
   }, [channels, fetchVideosForChannel, apiKey, setCachedVideos, cachedVideos.length]);
 
-  // Effect to fetch videos on initial mount if cache is empty, or when channels/API key change significantly
+
   useEffect(() => {
     if (!isClientMounted) return;
     if (apiKey && channels.length > 0) {
         if (cachedVideos.length === 0) { 
-           aggregateAndSortVideos(false); // Initial fetch if cache is empty
+           aggregateAndSortVideos(false); 
         }
     } else if (!apiKey && channels.length > 0) {
         setError("YouTube API Key is not set. Please add it to fetch videos.");
@@ -170,14 +173,9 @@ export default function Home() {
         setCachedVideos([]); 
         setError(null);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiKey, channels.length, isClientMounted]); // Only re-evaluate core fetching logic on these changes, not cachedVideos itself
+  }, [apiKey, channels, aggregateAndSortVideos, isClientMounted, cachedVideos.length ]); 
 
 
-  // This useEffect hook is responsible for creating the base shuffled list.
-  // It runs ONLY when `cachedVideos` (data from API/localStorage) or `channels` change.
-  // The `sortOption` used here for per-channel sorting will be the one active
-  // at the time this effect runs.
   useEffect(() => {
     if (!isClientMounted || cachedVideos.length === 0) {
       setBaseShuffledVideos([]);
@@ -186,14 +184,13 @@ export default function Home() {
   
     const videosByChannel = new Map<string, Video[]>();
     for (const video of cachedVideos) {
+      if (!channels.some(ch => ch.youtubeChannelId === video.channelId)) continue; 
       if (!videosByChannel.has(video.channelId)) {
         videosByChannel.set(video.channelId, []);
       }
       videosByChannel.get(video.channelId)!.push(video);
     }
   
-    // Sort within each channel using the CURRENT sortOption
-    // This defines what "top" means when picking from each channel for interleaving.
     videosByChannel.forEach(channelVideos => {
       channelVideos.sort((a, b) => {
         const valA = a[sortOption.property];
@@ -210,34 +207,27 @@ export default function Home() {
       });
     });
   
-    const activeChannelIdsInOrder = channels.map(c => c.youtubeChannelId);
     const combinedVideosForShuffle: Video[] = [];
+    const activeChannelIdsInOrder = channels.map(c => c.youtubeChannelId);
     const channelVideoIndices = new Map<string, number>(activeChannelIdsInOrder.map(id => [id, 0]));
-    const numActiveChannels = activeChannelIdsInOrder.length;
+    let videosAddedInRound = true;
     
-    if (numActiveChannels > 0) {
-      let videosProcessedInBatch = 0;
-      do {
-        videosProcessedInBatch = 0;
-        const currentBatch: Video[] = [];
-        for (const channelId of activeChannelIdsInOrder) {
-            const channelVideoList = videosByChannel.get(channelId);
-            const currentIndex = channelVideoIndices.get(channelId) || 0;
-            if (channelVideoList && currentIndex < channelVideoList.length) {
-                currentBatch.push(channelVideoList[currentIndex]);
-                channelVideoIndices.set(channelId, currentIndex + 1);
-                videosProcessedInBatch++;
-            }
+    while (videosAddedInRound) {
+      videosAddedInRound = false;
+      for (const channelId of activeChannelIdsInOrder) {
+        const channelVideosList = videosByChannel.get(channelId);
+        const currentIndex = channelVideoIndices.get(channelId) || 0;
+        if (channelVideosList && currentIndex < channelVideosList.length) {
+          combinedVideosForShuffle.push(channelVideosList[currentIndex]);
+          channelVideoIndices.set(channelId, currentIndex + 1);
+          videosAddedInRound = true;
         }
-        if (currentBatch.length > 0) {
-            combinedVideosForShuffle.push(...shuffleArray(currentBatch));
-        }
-      } while (videosProcessedInBatch > 0);
+      }
     }
     
-    setBaseShuffledVideos(combinedVideosForShuffle);
+    setBaseShuffledVideos(shuffleArray(combinedVideosForShuffle));
   
-  }, [cachedVideos, channels, sortOption, isClientMounted]); // sortOption is included here so that the *basis* for interleaving (what's "top" from each channel) is updated. The shuffle happens on this new base.
+  }, [cachedVideos, channels, sortOption, isClientMounted]);
 
   const memoizedFilteredVideos = useMemo(() => {
     if (!isClientMounted) return []; 
@@ -249,7 +239,8 @@ export default function Home() {
       videosToProcess = videosToProcess.filter(video => !isVideoHiddenOnMobile(video.id));
     }
     
-    // Filter by currently selected channels *after* shuffling the base list
+    // Ensure only videos from currently selected channels are processed *after* shuffling the base.
+    // This check was also done before shuffling, but it's good to have it robustly here too.
     videosToProcess = videosToProcess.filter(video => 
       channels.some(ch => ch.youtubeChannelId === video.channelId)
     );
@@ -270,26 +261,13 @@ export default function Home() {
         videosToProcess = videosToProcess.filter(video => !isVideoWatchLater(video.id));
     }
     
-    // The final sort for display, operating on the already shuffled and filtered list.
-    // This does NOT re-trigger the shuffleArray call on `baseShuffledVideos`.
-    videosToProcess.sort((a, b) => {
-      const valA = a[sortOption.property];
-      const valB = b[sortOption.property];
-      let comparison = 0;
-      if (typeof valA === 'number' && typeof valB === 'number') {
-        comparison = valA - valB;
-      } else if (typeof valA === 'string' && typeof valB === 'string') {
-        comparison = valA.localeCompare(valB);
-      } else if (sortOption.property === 'publishedDate') {
-        comparison = new Date(valA as string).getTime() - new Date(valB as string).getTime();
-      }
-      return sortOption.direction === 'asc' ? comparison : -comparison;
-    });
+    // The final sort based on sortOption was removed here to preserve the shuffle.
+    // The sortOption is now used to determine "top" videos *within each channel* before interleaving.
   
     return videosToProcess;
   
   }, [
-    baseShuffledVideos, // The shuffle operation for this list is controlled by its own useEffect
+    baseShuffledVideos, 
     isVideoWatched,
     isMobile,
     isVideoHiddenOnMobile,
@@ -297,8 +275,9 @@ export default function Home() {
     durationFilter,
     watchLaterFilter,
     isVideoWatchLater,
-    isClientMounted,
-    sortOption // This is for the final display sort
+    isClientMounted
+    // sortOption is NOT a dependency here for the final list, 
+    // as its primary role is now in the pre-sort for baseShuffledVideos
   ]);
 
   const stats = useMemo(() => {
@@ -327,7 +306,7 @@ export default function Home() {
     setCachedVideos([]); 
     toast({ title: "Video Cache Cleared", description: "Local video cache has been emptied." });
     if (apiKey && channels.length > 0) {
-      aggregateAndSortVideos(false); 
+      aggregateAndSortVideos(true); // Force a fresh fetch after clearing
     } else if (!apiKey && channels.length > 0) {
       setError("API Key is not set. Please add it to fetch videos.");
     } else {

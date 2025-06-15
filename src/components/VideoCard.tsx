@@ -25,6 +25,8 @@ export default function VideoCard({ video, onMarkAsWatched, isWatched, onToggleW
   const [showCard, setShowCard] = useState(!isWatched);
   const [publishedTimeAgo, setPublishedTimeAgo] = useState('');
 
+  const videoTitle = String(video.title || 'Untitled Video'); // Ensure title is a string
+
   useEffect(() => {
     try {
       setPublishedTimeAgo(formatDistanceToNow(new Date(video.publishedDate), { addSuffix: true }));
@@ -43,19 +45,19 @@ export default function VideoCard({ video, onMarkAsWatched, isWatched, onToggleW
   };
 
   const handleToggleWatchLater = () => {
-    onToggleWatchLater(video.id, video.title);
+    onToggleWatchLater(video.id, videoTitle);
   };
 
   const handleHideOnMobile = (e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevent card click or other actions
+    e.stopPropagation(); 
     e.preventDefault();
     setShowCard(false);
     setTimeout(() => {
-     onHideOnMobile(video.id, video.title);
+     onHideOnMobile(video.id, videoTitle);
     }, 300)
   }
 
-  if (!showCard && (isWatched || (isMobile /* && isHiddenOnMobile - this logic is handled by parent filter now */))) {
+  if (!showCard && (isWatched || (isMobile))) {
      return null; 
   }
 
@@ -81,10 +83,10 @@ export default function VideoCard({ video, onMarkAsWatched, isWatched, onToggleW
         </Button>
       )}
       <CardHeader className="p-0 relative">
-        <a href={video.link} target="_blank" rel="noopener noreferrer" aria-label={`Watch ${video.title} on YouTube`}>
+        <a href={video.link} target="_blank" rel="noopener noreferrer" aria-label={`Watch ${videoTitle} on YouTube`}>
           <Image
-            src={video.thumbnailUrl || `https://placehold.co/480x360.png?text=${encodeURIComponent(video.title)}`}
-            alt={`Thumbnail for ${video.title}`}
+            src={video.thumbnailUrl || `https://placehold.co/480x360.png?text=${encodeURIComponent(videoTitle)}`}
+            alt={`Thumbnail for ${videoTitle}`}
             width={480}
             height={270}
             className="w-full h-auto object-cover aspect-video"
@@ -94,7 +96,7 @@ export default function VideoCard({ video, onMarkAsWatched, isWatched, onToggleW
       </CardHeader>
       <CardContent className="p-4 flex-grow">
         <a href={video.link} target="_blank" rel="noopener noreferrer" className="hover:text-primary">
-          <CardTitle className="text-lg font-headline mb-2 leading-tight line-clamp-2 text-card-foreground">{video.title}</CardTitle>
+          <CardTitle className="text-lg font-headline mb-2 leading-tight line-clamp-2 text-card-foreground">{videoTitle}</CardTitle>
         </a>
         <div className="flex items-center text-sm text-muted-foreground mb-1">
           <YoutubeIcon className="h-4 w-4 mr-1.5 text-red-600"/> 
