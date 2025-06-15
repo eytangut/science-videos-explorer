@@ -6,7 +6,7 @@ import type {NextConfig} from 'next';
 // set REPO_NAME to your repository name.
 // If you are deploying to a user/organization page (e.g., https://<username>.github.io/),
 // set REPO_NAME to an empty string ''.
-const REPO_NAME = 'science-video-viewer'; // <<--!!! UPDATE THIS TO YOUR REPOSITORY NAME OR EMPTY STRING !!!
+const REPO_NAME = 'science-videos-explorer'; // <<--!!! UPDATE THIS TO YOUR REPOSITORY NAME OR EMPTY STRING !!!
 
 const isProd = process.env.NODE_ENV === 'production';
 
