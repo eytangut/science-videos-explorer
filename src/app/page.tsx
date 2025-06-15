@@ -12,7 +12,7 @@ import ChannelManagementPanel from '@/components/ChannelManagementPanel';
 import VideoList from '@/components/VideoList';
 import { toast } from '@/hooks/use-toast';
 import { Separator } from '@/components/ui/separator';
-import { fetchChannelPopularVideoIdsFromSearch, fetchVideosDetails, parseISO8601Duration } from '@/lib/youtubeDataApi';
+import { fetchChannelPopularVideoIdsFromSearch, fetchVideosDetails } from '@/lib/youtubeDataApi';
 import useLocalStorage from '@/hooks/useLocalStorage';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Info } from 'lucide-react';
@@ -22,7 +22,7 @@ type SortOption = {
   direction: 'asc' | 'desc';
 };
 
-type DurationFilter = 'all' | 'short' | 'medium' | 'long'; // short <10m, medium 10-30m, long >30m
+type DurationFilter = 'all' | 'short' | 'medium' | 'long';
 type WatchLaterFilter = 'all' | 'watchLaterOnly' | 'notWatchLater';
 
 // Fisher-Yates (Knuth) Shuffle
@@ -59,12 +59,9 @@ export default function Home() {
 
   const handleSetApiKey = (newApiKey: string) => {
     setApiKey(newApiKey);
-    // Only fetch if cache is empty; otherwise, wait for explicit refresh.
     if (newApiKey && channels.length > 0 && allVideos.length === 0) {
       aggregateAndSortVideos(false, newApiKey);
     } else if (!newApiKey) {
-      // Optionally clear videos if API key is removed, or let them persist from cache
-      // setAllVideos([]); 
       setError("API Key removed. Videos are shown from cache. Set API Key to fetch new videos.");
     }
   };
@@ -84,8 +81,7 @@ export default function Home() {
       .map(details => {
         const durationSeconds = parseISO8601Duration(details.contentDetails.duration);
         const views = parseInt(details.statistics.viewCount, 10) || 0;
-        // Rating is now just views
-        const rating = views; 
+        const rating = views; // Rating is just views
         
         return {
           id: details.id,
@@ -111,7 +107,7 @@ export default function Home() {
       return;
     }
     if (channels.length === 0) {
-      setAllVideos([]); // Clear videos if no channels are selected
+      setAllVideos([]); 
       setError(null);
       setIsLoading(false);
       return;
@@ -145,7 +141,6 @@ export default function Home() {
           }
           
           const uniqueVideosFromAPI = Array.from(new Map(fetchedVideosFromAPI.map(video => [video.id, video])).values());
-          // Explicit filter for duration before caching:
           const finalUniqueVideos = uniqueVideosFromAPI.filter(v => v.durationSeconds > 180); 
 
           setAllVideos(finalUniqueVideos);
@@ -154,13 +149,11 @@ export default function Home() {
           console.error("Error aggregating videos:", e);
           const message = e instanceof Error ? e.message : "An unknown error occurred during video aggregation.";
           setError(message);
-          setAllVideos([]); // Clear videos on major aggregation error
+          setAllVideos([]); 
         } finally {
           setIsLoading(false);
         }
     } else {
-        // Using existing cache because not forceRefresh and allVideos.length > 0
-        // No API call needed. The memoizedFilteredVideos will use the existing `allVideos`.
         setIsLoading(false);
     }
   }, [channels, fetchVideosForChannel, apiKey, setAllVideos, allVideos]);
@@ -168,27 +161,18 @@ export default function Home() {
 
   useEffect(() => {
     if (!isClientMounted) return;
-
-    // Initial load logic:
-    // Only fetch if cache is empty AND API key and channels are present.
-    // Otherwise, rely on cached data or user action (refresh/clear cache).
     if (apiKey && channels.length > 0) {
         if (allVideos.length === 0) { 
-           // Cache is empty, and setup is ready for an initial fetch.
-           aggregateAndSortVideos(false); // false = don't force, but it will fetch as cache is empty
+           aggregateAndSortVideos(false); 
         }
-        // If allVideos.length > 0, cache exists. User must explicitly refresh.
-        // No automatic fetch on component mount if cache has data.
     } else if (!apiKey && channels.length > 0) {
         setError("YouTube API Key is not set. Please add it to fetch videos.");
-        // Do not clear allVideos here, let user see cached data if any.
     } else if (channels.length === 0) {
-        setAllVideos([]); // Clear videos if no channels
+        setAllVideos([]); 
         setError(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiKey, channels.length, isClientMounted]); // Removed aggregateAndSortVideos, setAllVideos
-                                                // allVideos.length is implicitly handled by the conditions
+  }, [apiKey, channels.length, isClientMounted]);
 
   const handleRefreshVideos = () => {
     if (!apiKey) {
@@ -196,15 +180,14 @@ export default function Home() {
       return;
     }
     toast({ title: "Refreshing Videos...", description: "Fetching the latest popular videos from all channels." });
-    aggregateAndSortVideos(true); // forceRefresh = true
+    aggregateAndSortVideos(true);
   }
 
   const handleClearCache = () => {
     setAllVideos([]); 
     toast({ title: "Video Cache Cleared", description: "Local video cache has been emptied." });
-    // After clearing cache, if setup is valid, trigger a fresh fetch.
     if (apiKey && channels.length > 0) {
-      aggregateAndSortVideos(false); // Effectively a fresh fetch as cache is now empty
+      aggregateAndSortVideos(false); 
     } else if (!apiKey && channels.length > 0) {
       setError("API Key is not set. Please add it to fetch videos.");
     } else {
@@ -220,7 +203,6 @@ export default function Home() {
       videosToProcess = videosToProcess.filter(video => !isVideoHiddenOnMobile(video.id));
     }
 
-    // Ensure videos are from currently selected channels
     videosToProcess = videosToProcess.filter(video => 
       channels.some(ch => ch.youtubeChannelId === video.channelId)
     );
@@ -233,7 +215,6 @@ export default function Home() {
       videosByChannel.get(video.channelId)!.push(video);
     }
 
-    // Sort videos within each channel based on the global sortOption
     videosByChannel.forEach(channelVideos => {
       channelVideos.sort((a, b) => {
         const valA = a[sortOption.property];
@@ -251,37 +232,37 @@ export default function Home() {
     });
     
     const activeChannelIdsInOrder = channels.map(c => c.youtubeChannelId);
-    const interwovenAndShuffled: Video[] = [];
+    const allVideosForShuffle: Video[] = [];
     const channelVideoIndices = new Map<string, number>(activeChannelIdsInOrder.map(id => [id, 0]));
-    let moreVideosToProcessFromAnyChannel = true;
+    const numChannels = activeChannelIdsInOrder.length;
+    let addedToThisOuterBatchInLastRound = true;
 
-    while (moreVideosToProcessFromAnyChannel) {
-      const currentBatch: Video[] = [];
-      moreVideosToProcessFromAnyChannel = false; 
-
+    while(addedToThisOuterBatchInLastRound) {
+      addedToThisOuterBatchInLastRound = false;
       for (const channelId of activeChannelIdsInOrder) {
         const channelVideoList = videosByChannel.get(channelId);
-        const currentIndex = channelVideoIndices.get(channelId) || 0;
-        if (channelVideoList && currentIndex < channelVideoList.length) {
-          currentBatch.push(channelVideoList[currentIndex]);
-          channelVideoIndices.set(channelId, currentIndex + 1);
-          moreVideosToProcessFromAnyChannel = true; 
+        const startIndex = channelVideoIndices.get(channelId) || 0;
+        
+        if (channelVideoList && startIndex < channelVideoList.length) {
+            // Try to take 'numChannels' videos from this channel for the current conceptual "batch"
+            // This ensures channels with many videos contribute proportionally more over time if others run out.
+            // The actual "batch" for shuffling will be formed *after* this loop by collecting all such videos.
+            const videosToTakeCount = numChannels; 
+            const videosFromThisChannelInThisRound = channelVideoList.slice(startIndex, startIndex + videosToTakeCount);
+            
+            if (videosFromThisChannelInThisRound.length > 0) {
+                allVideosForShuffle.push(...videosFromThisChannelInThisRound);
+                channelVideoIndices.set(channelId, startIndex + videosFromThisChannelInThisRound.length);
+                addedToThisOuterBatchInLastRound = true;
+            }
         }
-      }
-
-      if (currentBatch.length > 0) {
-        interwovenAndShuffled.push(...shuffleArray(currentBatch)); 
-      }
-      
-      if (!moreVideosToProcessFromAnyChannel) { 
-          break; 
       }
     }
     
-    let filteredAndProcessed = interwovenAndShuffled;
+    let interwovenAndShuffled = shuffleArray(allVideosForShuffle); 
 
     if (durationFilter !== 'all') {
-      filteredAndProcessed = filteredAndProcessed.filter(video => {
+      interwovenAndShuffled = interwovenAndShuffled.filter(video => {
         const duration = video.durationSeconds;
         if (durationFilter === 'short') return duration < 600; 
         if (durationFilter === 'medium') return duration >= 600 && duration <= 1800; 
@@ -291,13 +272,12 @@ export default function Home() {
     }
 
     if (watchLaterFilter === 'watchLaterOnly') {
-        filteredAndProcessed = filteredAndProcessed.filter(video => isVideoWatchLater(video.id));
+        interwovenAndShuffled = interwovenAndShuffled.filter(video => isVideoWatchLater(video.id));
     } else if (watchLaterFilter === 'notWatchLater') {
-        filteredAndProcessed = filteredAndProcessed.filter(video => !isVideoWatchLater(video.id));
+        interwovenAndShuffled = interwovenAndShuffled.filter(video => !isVideoWatchLater(video.id));
     }
     
-    // No final global sort is applied here to preserve the batched shuffle order
-    return filteredAndProcessed;
+    return interwovenAndShuffled;
 
   }, [allVideos, isVideoWatched, isMobile, isVideoHiddenOnMobile, channels, durationFilter, watchLaterFilter, sortOption, isVideoWatchLater, isClientMounted]);
 
@@ -305,16 +285,14 @@ export default function Home() {
     if (!isClientMounted) return { totalUnwatched: 0, averageRating: "0.00" };
 
     const totalUnwatched = memoizedFilteredVideos.length;
-    // Rating is just views now, so averageRating is average views.
     const averageViews = totalUnwatched > 0 
       ? memoizedFilteredVideos.reduce((sum, video) => sum + video.views, 0) / totalUnwatched
       : 0;
     return {
       totalUnwatched,
-      averageRating: averageViews.toFixed(0) // Display as whole number for views
+      averageRating: averageViews.toFixed(0) 
     };
   }, [memoizedFilteredVideos, isClientMounted]);
-
 
   return (
     <div className="flex flex-col md:flex-row min-h-screen bg-background text-foreground">
@@ -355,7 +333,7 @@ export default function Home() {
           videos={memoizedFilteredVideos}
           onMarkAsWatched={addWatchedVideo}
           watchedVideoIds={watchedVideoIds}
-          isLoading={isLoading && !!apiKey} // Show loading only if API key is present and loading
+          isLoading={isLoading && !!apiKey} 
           error={error}
           hasChannels={channels.length > 0}
           apiKeyIsSet={!!apiKey}
@@ -375,4 +353,28 @@ export default function Home() {
       </main>
     </div>
   );
+}
+
+// Helper function (already in your code, moved for clarity if not already present)
+function parseISO8601Duration(durationString: string): number {
+  if (!durationString || !durationString.startsWith('PT')) {
+    return 0;
+  }
+  let remaining = durationString.substring(2);
+  let totalSeconds = 0;
+
+  const timeRegex = /(\d+)([HMS])/g;
+  let match;
+  while ((match = timeRegex.exec(remaining)) !== null) {
+    const value = parseInt(match[1], 10);
+    const unit = match[2];
+    if (unit === 'H') {
+      totalSeconds += value * 3600;
+    } else if (unit === 'M') {
+      totalSeconds += value * 60;
+    } else if (unit === 'S') {
+      totalSeconds += value;
+    }
+  }
+  return totalSeconds;
 }
