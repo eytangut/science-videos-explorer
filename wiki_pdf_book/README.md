@@ -2,6 +2,8 @@
 
 A Python script that generates a polished, book-like PDF from all articles in a Wikipedia category — complete with a cover page, table of contents, per-article title pages, inline images, and more.
 
+![Output preview](preview_screenshot.png)
+
 ## Features
 
 All 14 features are **individually toggleable** via constants at the top of the script, and many can also be toggled from the command line:

@@ -658,9 +658,10 @@ def story_article_body(
     description: str,
     image_urls: list[str],
     st: dict,
+    leading_page_break: bool = True,
 ) -> list:
     """Return flowables for the article body text."""
-    els: list = [PageBreak()]
+    els: list = [PageBreak()] if leading_page_break else []
 
     # Zero-height marker: sets running header and feeds the TOC
     els.append(_ArticleMarker(title))
@@ -800,10 +801,12 @@ def generate(category: str, output: str, max_articles: int = MAX_ARTICLES):
     )
 
     story: list = []
+    story_has_content = False  # track whether any real pages have been added
 
     # ── Cover page ────────────────────────────────────────────────────────────
     if FEATURE_BOOK_COVER_PAGE:
         story.extend(story_cover(category, len(articles), st))
+        story_has_content = True
 
     # ── Table of contents ─────────────────────────────────────────────────────
     toc = None
@@ -819,6 +822,7 @@ def generate(category: str, output: str, max_articles: int = MAX_ARTICLES):
         ]
         toc.dotsMinLevel = 0
         story.extend(story_toc(toc, st))
+        story_has_content = True
 
     # ── Articles ──────────────────────────────────────────────────────────────
     all_titles: list[str] = []
@@ -845,9 +849,14 @@ def generate(category: str, output: str, max_articles: int = MAX_ARTICLES):
         # Title page
         if FEATURE_ARTICLE_TITLE_PAGES:
             story.extend(story_article_title_page(title, extract, thumbnail_url, idx, st))
+            story_has_content = True
 
-        # Body
-        story.extend(story_article_body(title, extract, description, image_urls, st))
+        # Body — only prepend a PageBreak if something already precedes it
+        story.extend(story_article_body(
+            title, extract, description, image_urls, st,
+            leading_page_break=story_has_content,
+        ))
+        story_has_content = True
 
     # ── Index ─────────────────────────────────────────────────────────────────
     if FEATURE_CATEGORY_INDEX_PAGE:
